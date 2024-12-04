@@ -1128,19 +1128,19 @@
     ]
   },
   "packageFolders": {
-    "C:\\Users\\Vlaeriu\\.nuget\\packages\\": {}
+    "/root/.nuget/packages/": {}
   },
   "project": {
     "version": "1.0.0",
     "restore": {
-      "projectUniqueName": "D:\\licenta\\licenta-backend\\RasberryAPI\\RasberryAPI.csproj",
+      "projectUniqueName": "/var/www/licenta.stefandanieluta.ro/backend/licenta-backend/RasberryAPI/RasberryAPI.csproj",
       "projectName": "RasberryAPI",
-      "projectPath": "D:\\licenta\\licenta-backend\\RasberryAPI\\RasberryAPI.csproj",
-      "packagesPath": "C:\\Users\\Vlaeriu\\.nuget\\packages\\",
-      "outputPath": "D:\\licenta\\licenta-backend\\RasberryAPI\\obj\\",
+      "projectPath": "/var/www/licenta.stefandanieluta.ro/backend/licenta-backend/RasberryAPI/RasberryAPI.csproj",
+      "packagesPath": "/root/.nuget/packages/",
+      "outputPath": "/var/www/licenta.stefandanieluta.ro/backend/licenta-backend/RasberryAPI/obj/",
       "projectStyle": "PackageReference",
       "configFilePaths": [
-        "C:\\Users\\Vlaeriu\\AppData\\Roaming\\NuGet\\NuGet.Config"
+        "/root/.nuget/NuGet/NuGet.Config"
       ],
       "originalTargetFrameworks": [
         "net8.0"
@@ -1209,7 +1209,7 @@
             "privateAssets": "all"
           }
         },
-        "runtimeIdentifierGraphPath": "C:\\Program Files\\dotnet\\sdk\\8.0.403/PortableRuntimeIdentifierGraph.json"
+        "runtimeIdentifierGraphPath": "/usr/share/dotnet/sdk/8.0.404/PortableRuntimeIdentifierGraph.json"
       }
     }
   }

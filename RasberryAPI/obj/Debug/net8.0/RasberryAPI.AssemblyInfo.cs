@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("RasberryAPI")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+ce6eb0b1be2d16a525f99d87f28dc59272c2d988")]
 [assembly: System.Reflection.AssemblyProductAttribute("RasberryAPI")]
 [assembly: System.Reflection.AssemblyTitleAttribute("RasberryAPI")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]

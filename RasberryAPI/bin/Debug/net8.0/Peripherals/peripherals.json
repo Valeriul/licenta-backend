@@ -1,1 +1,7 @@
-[]
+[
+  {
+    "PeripheralType": "TemperatureHumiditySensor",
+    "Uuid": "31a5f7f1-1d57-41e8-8ff6-8cee3d6c4968",
+    "Url": "ws://placeholder-temperature-sensor-31a5f7f1-1d57-41e8-8ff6-8cee3d6c4968.local"
+  }
+]

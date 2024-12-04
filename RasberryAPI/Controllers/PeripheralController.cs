@@ -7,7 +7,7 @@ using System.Threading.Tasks;
 namespace BackendAPI.Controllers
 {
     [ApiController]
-    [Route("/[controller]")]
+    [Route("[controller]")]
     public class PeripheralController : ControllerBase
     {
         
