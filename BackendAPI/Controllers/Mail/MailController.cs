@@ -1,23 +1,29 @@
 using Microsoft.AspNetCore.Mvc;
 using BackendAPI.Services;
+using System;
+using System.Collections.Generic;
 using System.Threading.Tasks;
 
 namespace BackendAPI.Controllers
 {
     [ApiController]
-    [Route("/[controller]")]
+    [Route("api/[controller]")]
     public class MailController : ControllerBase
     {
         private readonly MailService _mailService;
+        private readonly IConfiguration _configuration;
 
         public MailController(IConfiguration configuration)
         {
-            var smtpHost = configuration["Smtp:Host"];
-            var smtpPort = int.Parse(configuration["Smtp:Port"]);
-            var smtpUser = configuration["Smtp:User"];
-            var smtpPassword = configuration["Smtp:Password"];
+            _configuration = configuration;
 
-            
+            // Retrieve SMTP settings from configuration
+            var smtpHost = _configuration["SMTP:Host"];
+            var smtpPort = int.Parse(_configuration["SMTP:Port"]);
+            var smtpUser = _configuration["SMTP:Username"];
+            var smtpPassword = _configuration["SMTP:Password"];
+
+            // Initialize the MailService
             if (!string.IsNullOrEmpty(smtpUser) && !string.IsNullOrEmpty(smtpPassword))
             {
                 _mailService = new MailService(smtpHost, smtpPort, smtpUser, smtpPassword);
@@ -31,20 +37,45 @@ namespace BackendAPI.Controllers
         [HttpPost("sendVerificationEmail")]
         public async Task<IActionResult> SendVerificationEmail([FromBody] string email)
         {
-            var parameters = new Dictionary<string, object>
+            try
             {
-                { "@p_email", email }
-            };
+                if (string.IsNullOrEmpty(email))
+                {
+                    return BadRequest("Email address cannot be empty.");
+                }
 
-            var response = await MySqlDatabaseService.Instance.ExecuteQueryAsync("SELECT salt FROM users WHERE email = @p_email", parameters);
-            if (response.Count == 0)
-                return BadRequest("User not found");
+                // Query database to retrieve the salt for the user
+                var parameters = new Dictionary<string, object>
+                {
+                    { "@p_email", email }
+                };
 
-            var salt = (string)response[0]["salt"];
+                var response = await MySqlDatabaseService.Instance.ExecuteQueryAsync("SELECT salt FROM users WHERE email = @p_email", parameters);
 
-            await _mailService.sendVerificationEmail(email, salt);
-            return Ok();
+                if (response.Count == 0)
+                {
+                    return NotFound("User not found.");
+                }
+
+                var salt = response[0]["salt"]?.ToString();
+
+                if (string.IsNullOrEmpty(salt))
+                {
+                    return StatusCode(500, "Salt for user not found.");
+                }
+
+                // Send verification email
+                await _mailService.SendVerificationEmail(email, salt);
+                return Ok("Verification email sent successfully.");
+            }
+            catch (Exception ex)
+            {
+                // Log error (if you have logging implemented)
+                Console.WriteLine($"Error occurred: {ex.Message}");
+
+                // Return internal server error
+                return StatusCode(500, "An error occurred while sending the email.");
+            }
         }
     }
-
 }

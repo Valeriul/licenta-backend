@@ -29,6 +29,8 @@ await BackendAPI.Services.WebSocketManager.Instance.InitializeAsync();
 
 var app = builder.Build();
 
+app.UsePathBase("/api");
+
 if (app.Environment.IsDevelopment())
 {
     app.UseSwagger();
