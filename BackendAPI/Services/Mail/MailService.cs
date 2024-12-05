@@ -27,7 +27,7 @@ namespace BackendAPI.Services
             var email = new MimeMessage();
 
             // Configure email sender and recipient
-            email.From.Add(new MailboxAddress("lICENTA STEFAN DANIEL UTA", _smtpUser));
+            email.From.Add(new MailboxAddress("NoReply LicentaDemo", _smtpUser));
             email.To.Add(MailboxAddress.Parse(toEmail));
             email.Subject = subject;
 
@@ -85,9 +85,15 @@ namespace BackendAPI.Services
 
                 // Read and prepare the HTML email body
                 var htmlBody = await File.ReadAllTextAsync(bodyPath);
-
-                // Replace placeholders in the HTML email body
-                htmlBody = htmlBody.Replace("{{salt}}", salt);
+                
+                if (Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT") == "Development")
+                {
+                    htmlBody = htmlBody.Replace("{{url}}", "http://locahost:3000/verify-user?s=" + salt);
+                }
+                else
+                {
+                    htmlBody = htmlBody.Replace("{{url}}", "https://licenta.stefandanieluta.ro/verify-user/?=" + salt);
+                }
 
                 // Send the email with an optional plain text body
                 var plainTextBody = $"Please use the following verification code: {salt}";

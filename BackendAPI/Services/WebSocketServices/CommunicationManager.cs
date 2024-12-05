@@ -88,6 +88,8 @@ namespace BackendAPI.Services
                     return await WebSocketManager.Instance.SendMessageAsync(request.id_user, "{\"CommandType\":\"GET_ALL_DATA\"}");
                 case "get_all_sensor_data":
                     return await WebSocketManager.Instance.SendMessageAsync(request.id_user, "{\"CommandType\":\"GET_ALL_SENSOR_DATA\"}");
+                case "get_all_peripherals":
+                    return await WebSocketManager.Instance.SendMessageAsync(request.id_user, "{\"CommandType\":\"ALL_PERIPHERALS\"}");
                 case "control":
                     return await WebSocketManager.Instance.SendMessageAsync(request.id_user, request.Data);
                 default:

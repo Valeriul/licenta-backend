@@ -20,6 +20,25 @@ namespace BackendAPI.Services
             return result ?? string.Empty;
         }
 
+        public async Task<bool> InitializePeripheral(ulong id_user)
+        {
+            var result = await CommunicationManager.Instance.HandleCommand(new CommandRequest
+            {
+                CommandType = "get_all_peripherals",
+                id_user = id_user,
+            });
+
+            result = result.Replace("[\"", "[").Replace("\"]", "]").Replace("\\\"", "\"").Replace("[[", "[").Replace("]]", "]");
+            var peripherals = JsonConvert.DeserializeObject<List<Dictionary<string, object>>>(result);
+
+            foreach (var peripheral in peripherals)
+            {
+                await AddPeripheral(id_user, peripheral["uuid"].ToString(), peripheral["type"].ToString());
+            }
+
+            return true;
+        }
+
         public async Task<object> GetSensorData(ulong id_user)
         {
             var result = await CommunicationManager.Instance.HandleCommand(new CommandRequest
@@ -47,34 +66,39 @@ namespace BackendAPI.Services
             var allPeripheralsJson = await GetAllPeripherals(id_user);
             var allDataJson = await GetAllData(id_user);
 
-            
+            if (allPeripheralsJson == "[]")
+            {
+                await InitializePeripheral(id_user);
+                allPeripheralsJson = await GetAllPeripherals(id_user);
+            }
+
             var peripherals = JsonConvert.DeserializeObject<List<Dictionary<string, object>>>(allPeripheralsJson);
 
-            
+
             var rawData = JsonConvert.DeserializeObject<List<string>>(allDataJson);
 
-            
+
             var data = JsonConvert.DeserializeObject<List<Dictionary<string, object>>>(rawData[0]);
 
-            
+
             foreach (var peripheral in peripherals)
             {
                 var matchingData = data.FirstOrDefault(d => d["uuid"].ToString() == peripheral["uuid_Peripheral"].ToString());
                 if (matchingData != null)
                 {
-                    
+
                     peripheral["data"] = matchingData["data"] != null
                         ? JsonConvert.DeserializeObject(matchingData["data"].ToString() ?? "{}")
                         : null;
                 }
                 else
                 {
-                    
+
                     peripheral["data"] = null;
                 }
             }
 
-            
+
             return JsonConvert.SerializeObject(peripherals);
         }
         public async Task<string> ControlPeripheral(ulong id_user, BackendAPI.Models.ControlCommand data)
@@ -130,11 +154,36 @@ namespace BackendAPI.Services
                     { "@p_gridPosition", peripheral.Grid_position }
                 };
 
-                var queryResult = await MySqlDatabaseService.Instance.ExecuteNonQueryAsync("UPDATE peripherals p JOIN users u ON p.uuid_Central = u.uuid_Central SET p.grid_position = @p_gridPosition WHERE p.uuid_Peripheral = @p_uuid AND u.id_user = @p_id_user;", parameters);     
+                var queryResult = await MySqlDatabaseService.Instance.ExecuteNonQueryAsync("UPDATE peripherals p JOIN users u ON p.uuid_Central = u.uuid_Central SET p.grid_position = @p_gridPosition WHERE p.uuid_Peripheral = @p_uuid AND u.id_user = @p_id_user;", parameters);
             }
 
             return true;
 
+        }
+
+        public async Task<bool> AddPeripheral(ulong id_user, string uuid, string type)
+        {
+            var parameters = new Dictionary<string, object>
+            {
+                { "@p_id_user", id_user.ToString() },
+                { "@p_uuid", uuid },
+                { "@p_type", type }
+            };
+
+            await MySqlDatabaseService.Instance.ExecuteNonQueryAsync("INSERT INTO peripherals (uuid_Peripheral, type, uuid_Central) VALUES (@p_uuid, @p_type,(SELECT uuid_Central FROM users where id_user = @p_id_user));", parameters);
+            return true;
+        }
+
+        public async Task<bool> RemovePeripheral(ulong id_user, string uuid)
+        {
+            var parameters = new Dictionary<string, object>
+            {
+                { "@p_id_user", id_user.ToString() },
+                { "@p_uuid", uuid }
+            };
+
+            await MySqlDatabaseService.Instance.ExecuteNonQueryAsync("DELETE FROM peripherals WHERE uuid_Peripheral = @p_uuid AND uuid_Central = (SELECT uuid_Central FROM users where id_user = @p_id_user);", parameters);
+            return true;
         }
     }
 }

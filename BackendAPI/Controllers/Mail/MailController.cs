@@ -23,15 +23,8 @@ namespace BackendAPI.Controllers
             var smtpUser = _configuration["SMTP:Username"];
             var smtpPassword = _configuration["SMTP:Password"];
 
-            // Initialize the MailService
-            if (!string.IsNullOrEmpty(smtpUser) && !string.IsNullOrEmpty(smtpPassword))
-            {
-                _mailService = new MailService(smtpHost, smtpPort, smtpUser, smtpPassword);
-            }
-            else
-            {
-                _mailService = new MailService(smtpHost, smtpPort);
-            }
+            _mailService = new MailService(smtpHost, smtpPort, smtpUser, smtpPassword);
+
         }
 
         [HttpPost("sendVerificationEmail")]

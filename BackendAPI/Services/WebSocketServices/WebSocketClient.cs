@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Net.WebSockets;
 using System.Text;
 using System.Threading;
@@ -12,13 +13,14 @@ namespace BackendAPI.Services
         public ulong Key { get; private set; }
         public bool IsConnected => _clientWebSocket.State == WebSocketState.Open;
 
-        private TaskCompletionSource<string?>? _responseTaskCompletionSource;
+        private readonly ConcurrentQueue<TaskCompletionSource<string?>> _responseQueue;
 
-        public WebSocketClient(ulong Key, string url)
+        public WebSocketClient(ulong key, string url)
         {
             _clientWebSocket = new ClientWebSocket();
             WebSocketUri = url;
-            this.Key = Key;
+            Key = key;
+            _responseQueue = new ConcurrentQueue<TaskCompletionSource<string?>>();
         }
 
         public async Task ConnectAsync()
@@ -44,10 +46,13 @@ namespace BackendAPI.Services
             if (_clientWebSocket.State != WebSocketState.Open)
                 throw new InvalidOperationException("WebSocket is not connected.");
 
-            _responseTaskCompletionSource = new TaskCompletionSource<string?>();
+            var responseTask = new TaskCompletionSource<string?>();
+            _responseQueue.Enqueue(responseTask);
+
             var messageBytes = Encoding.UTF8.GetBytes(message);
             await _clientWebSocket.SendAsync(new ArraySegment<byte>(messageBytes), WebSocketMessageType.Text, true, CancellationToken.None);
-            return await _responseTaskCompletionSource.Task;
+
+            return await responseTask.Task;
         }
 
         private async Task ListenForMessagesAsync()
@@ -78,25 +83,33 @@ namespace BackendAPI.Services
 
         private async Task HandleIncomingMessage(string message)
         {
-            if (_responseTaskCompletionSource != null && !_responseTaskCompletionSource.Task.IsCompleted)
+            // Check if there is a waiting TaskCompletionSource in the queue
+            if (_responseQueue.TryDequeue(out var responseTask))
             {
-                if(message == "null"){
-                    _responseTaskCompletionSource.SetResult(null);
-                    _responseTaskCompletionSource = null;
-                    return;
+                // Handle null response explicitly
+                if (message == "null")
+                {
+                    responseTask.SetResult(null);
                 }
-                _responseTaskCompletionSource.SetResult(message);
-                _responseTaskCompletionSource = null;
+                else
+                {
+                    responseTask.SetResult(message);
+                }
             }
-            else{
-                await CommunicationManager.Instance.HandleUnexpectedMessageAsync(Key,message);
+            else
+            {
+                // Handle unexpected messages
+                await CommunicationManager.Instance.HandleUnexpectedMessageAsync(Key, message);
             }
         }
 
         public async Task CloseAsync()
         {
-            await _clientWebSocket.CloseAsync(WebSocketCloseStatus.NormalClosure, "Closing connection", CancellationToken.None);
-            Console.WriteLine($"Connection to {WebSocketUri} closed.");
+            if (_clientWebSocket.State == WebSocketState.Open)
+            {
+                await _clientWebSocket.CloseAsync(WebSocketCloseStatus.NormalClosure, "Closing connection", CancellationToken.None);
+                Console.WriteLine($"Connection to {WebSocketUri} closed.");
+            }
         }
     }
 }
