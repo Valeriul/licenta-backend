@@ -2,3 +2,5 @@ RasberryAPI/bin/
 RasberryAPI/obj/
 BackendAPI/bin/
 BackendAPI/obj/
+BackendAPI/appsettings.json
+RasberryAPI/appsettings.json
