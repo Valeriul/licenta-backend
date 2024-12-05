@@ -1,12 +1,2 @@
 [
-    {
-        "PeripheralType": "TemperatureHumiditySensor",
-        "Uuid": "1",
-        "Url": "http://ceva1.com"
-    },
-    {
-        "PeripheralType": "TemperatureControl",
-        "Uuid": "2",
-        "Url": "http://ceva2.com"
-    }
 ]
