@@ -27,9 +27,9 @@ namespace RasberryAPI
             app.UseSwagger();
             app.UseSwaggerUI(c =>
             {
-                // Use the /rasberry prefix for Swagger endpoint
+                
                 c.SwaggerEndpoint("/rasberry/swagger/v1/swagger.json", "WebSocket Server API v1");
-                c.RoutePrefix = string.Empty; // Serve Swagger UI at the root of /rasberry
+                c.RoutePrefix = string.Empty; 
             });
 
 

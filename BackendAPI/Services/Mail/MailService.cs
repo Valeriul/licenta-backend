@@ -13,7 +13,7 @@ namespace BackendAPI.Services
         private readonly string _smtpUser;
         private readonly string _smtpPass;
 
-        // Parameterized constructor
+        
         public MailService(string smtpServer, int smtpPort, string smtpUser = null, string smtpPass = null)
         {
             _smtpServer = smtpServer;
@@ -26,12 +26,12 @@ namespace BackendAPI.Services
         {
             var email = new MimeMessage();
 
-            // Configure email sender and recipient
+            
             email.From.Add(new MailboxAddress("NoReply LicentaDemo", _smtpUser));
             email.To.Add(MailboxAddress.Parse(toEmail));
             email.Subject = subject;
 
-            // Build the email body with both HTML and plain text (optional)
+            
             var builder = new BodyBuilder
             {
                 HtmlBody = htmlBody,
@@ -43,27 +43,27 @@ namespace BackendAPI.Services
 
             try
             {
-                // Connect to the SMTP server with SSL
+                
                 await smtp.ConnectAsync(_smtpServer, _smtpPort, MailKit.Security.SecureSocketOptions.SslOnConnect);
 
-                // Authenticate with the SMTP server
+                
                 if (!string.IsNullOrEmpty(_smtpUser) && !string.IsNullOrEmpty(_smtpPass))
                 {
                     await smtp.AuthenticateAsync(_smtpUser, _smtpPass);
                 }
 
-                // Send the email
+                
                 await smtp.SendAsync(email);
             }
             catch (Exception ex)
             {
-                // Log the error (replace with your logging framework)
+                
                 Console.WriteLine($"Error sending email: {ex.Message}");
-                throw; // Re-throw the exception to handle it in the calling method
+                throw; 
             }
             finally
             {
-                // Disconnect from the SMTP server
+                
                 await smtp.DisconnectAsync(true);
             }
         }
@@ -74,7 +74,7 @@ namespace BackendAPI.Services
 
             try
             {
-                // Define the path to the HTML template
+                
                 var basePath = AppDomain.CurrentDomain.BaseDirectory;
                 var bodyPath = Path.Combine(basePath, "assets", "mailBodies", "verifyEmailBody.html");
 
@@ -83,7 +83,7 @@ namespace BackendAPI.Services
                     throw new FileNotFoundException("Email body template file not found.", bodyPath);
                 }
 
-                // Read and prepare the HTML email body
+                
                 var htmlBody = await File.ReadAllTextAsync(bodyPath);
                 
                 if (Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT") == "Development")
@@ -95,19 +95,19 @@ namespace BackendAPI.Services
                     htmlBody = htmlBody.Replace("{{url}}", "https://licenta.stefandanieluta.ro/verify-user/?=" + salt);
                 }
 
-                // Send the email with an optional plain text body
+                
                 var plainTextBody = $"Please use the following verification code: {salt}";
                 await SendEmailAsync(email, subject, htmlBody, plainTextBody);
             }
             catch (FileNotFoundException ex)
             {
-                // Log file-related errors
+                
                 Console.WriteLine($"Error reading email template: {ex.Message}");
                 throw;
             }
             catch (Exception ex)
             {
-                // Log generic errors
+                
                 Console.WriteLine($"Error sending verification email: {ex.Message}");
                 throw;
             }

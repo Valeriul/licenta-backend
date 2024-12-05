@@ -17,7 +17,7 @@ namespace BackendAPI.Controllers
         {
             _configuration = configuration;
 
-            // Retrieve SMTP settings from configuration
+            
             var smtpHost = _configuration["SMTP:Host"];
             var smtpPort = int.Parse(_configuration["SMTP:Port"]);
             var smtpUser = _configuration["SMTP:Username"];
@@ -37,7 +37,7 @@ namespace BackendAPI.Controllers
                     return BadRequest("Email address cannot be empty.");
                 }
 
-                // Query database to retrieve the salt for the user
+                
                 var parameters = new Dictionary<string, object>
                 {
                     { "@p_email", email }
@@ -57,16 +57,16 @@ namespace BackendAPI.Controllers
                     return StatusCode(500, "Salt for user not found.");
                 }
 
-                // Send verification email
+                
                 await _mailService.SendVerificationEmail(email, salt);
                 return Ok("Verification email sent successfully.");
             }
             catch (Exception ex)
             {
-                // Log error (if you have logging implemented)
+                
                 Console.WriteLine($"Error occurred: {ex.Message}");
 
-                // Return internal server error
+                
                 return StatusCode(500, "An error occurred while sending the email.");
             }
         }

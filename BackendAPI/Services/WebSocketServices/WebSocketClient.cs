@@ -83,10 +83,10 @@ namespace BackendAPI.Services
 
         private async Task HandleIncomingMessage(string message)
         {
-            // Check if there is a waiting TaskCompletionSource in the queue
+            
             if (_responseQueue.TryDequeue(out var responseTask))
             {
-                // Handle null response explicitly
+                
                 if (message == "null")
                 {
                     responseTask.SetResult(null);
@@ -98,7 +98,7 @@ namespace BackendAPI.Services
             }
             else
             {
-                // Handle unexpected messages
+                
                 await CommunicationManager.Instance.HandleUnexpectedMessageAsync(Key, message);
             }
         }
