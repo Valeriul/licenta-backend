@@ -7,7 +7,7 @@ namespace BackendAPI.Services
 {
     public class WebSocketClient
     {
-        private readonly ClientWebSocket _clientWebSocket;
+        private ClientWebSocket _clientWebSocket;
         public string WebSocketUri { get; private set; }
 
         public ulong Key { get; private set; }
@@ -28,6 +28,12 @@ namespace BackendAPI.Services
             if (_clientWebSocket.State == WebSocketState.Open)
                 return;
 
+            if (_clientWebSocket.State == WebSocketState.Closed || _clientWebSocket.State == WebSocketState.Aborted)
+            {
+                _clientWebSocket.Dispose();
+                _clientWebSocket = new ClientWebSocket(); // Recreate WebSocket
+            }
+
             try
             {
                 await _clientWebSocket.ConnectAsync(new Uri(WebSocketUri), CancellationToken.None);
@@ -40,6 +46,7 @@ namespace BackendAPI.Services
                 throw;
             }
         }
+
 
         public async Task<string?> SendMessageAndWaitForResponseAsync(string message)
         {
