@@ -56,7 +56,29 @@ namespace BackendAPI.Services
 
             try
             {
-                await client.ConnectAsync();
+                int retryCount = 0;
+                const int maxRetries = 3;
+                const int delayMilliseconds = 2000;
+
+                while (retryCount < maxRetries)
+                {
+                    try
+                    {
+                        await client.ConnectAsync();
+                        break;
+                    }
+                    catch (System.Net.WebSockets.WebSocketException ex) when (ex.InnerException is System.Net.Sockets.SocketException)
+                    {
+                        retryCount++;
+                        if (retryCount >= maxRetries)
+                        {
+                            Console.WriteLine($"Failed to connect WebSocket for user {id_user} after {maxRetries} attempts: {ex.Message}");
+                            throw;
+                        }
+                        Console.WriteLine($"Retrying connection for user {id_user} in {delayMilliseconds}ms...");
+                        await Task.Delay(delayMilliseconds);
+                    }
+                }
                 return "WebSocket client registered successfully.";
             }
             catch (Exception ex)

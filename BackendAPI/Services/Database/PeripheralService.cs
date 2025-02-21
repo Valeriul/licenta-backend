@@ -33,7 +33,14 @@ namespace BackendAPI.Services
 
             foreach (var peripheral in peripherals)
             {
-                await AddPeripheral(id_user, peripheral["uuid"].ToString(), peripheral["type"].ToString());
+                try
+                {
+                    await AddPeripheral(id_user, peripheral["uuid"].ToString(), peripheral["type"].ToString());
+                }
+                catch (System.Exception e)
+                {
+                    System.Console.WriteLine(e.Message);
+                }
             }
 
             return true;

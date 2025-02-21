@@ -112,6 +112,25 @@ namespace BackendAPI.Controllers
             return Unauthorized("Invalid email or password");
         }
 
+         [HttpGet("loginWithCentralUUID")]
+        public async Task<IActionResult> LoginWithCentralUUID([FromQuery] string uuid)
+        {
+            if (string.IsNullOrEmpty(uuid))
+                return BadRequest("UUID is required");
+
+            var parameters = new Dictionary<string, object>
+            {
+                { "@p_uuid", uuid }
+            };
+
+            var response = await MySqlDatabaseService.Instance.ExecuteQueryAsync("SELECT id_user FROM users WHERE uuid_Central = @p_uuid", parameters);
+            
+            if (response.Count == 0)
+                return NotFound("User not found");
+
+            return Ok(new { id_user = response[0]["id_user"] });
+        }
+
 
         [HttpPost("loginWithSalt")]
 
