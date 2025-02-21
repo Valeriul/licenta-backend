@@ -10,7 +10,7 @@ namespace BackendAPI.Controllers
     [Route("[controller]")]
     public class PeripheralController : ControllerBase
     {
-        
+
         [HttpGet("list")]
         public IActionResult ListPeripherals()
         {
@@ -26,56 +26,105 @@ namespace BackendAPI.Controllers
             }
         }
 
-        [HttpPost("addTemperatureHumiditySensor")]
-        public IActionResult AddTemperatureHumiditySensor()
-        {
-            string uuid = Guid.NewGuid().ToString(); 
+        // [HttpPost("addTemperatureHumiditySensor")]
+        // public IActionResult AddTemperatureHumiditySensor()
+        // {
+        //     string uuid = Guid.NewGuid().ToString();
 
-            try
-            {
-                var config = new PeripheralConfig
-                {
-                    PeripheralType = "TemperatureHumiditySensor",
-                    Uuid = uuid,
-                    Url = $"ws://placeholder-temperature-sensor-{uuid}.local"
-                };
+        //     try
+        //     {
+        //         var config = new PeripheralConfig
+        //         {
+        //             PeripheralType = "TemperatureHumiditySensor",
+        //             Uuid = uuid,
+        //             Url = $"ws://placeholder-temperature-sensor-{uuid}.local"
+        //         };  
 
-                PeripheralManager.Instance.AddPeripheral(config);
-                return Ok($"TemperatureHumiditySensor with UUID {uuid} added successfully.");
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"Error adding TemperatureHumiditySensor: {ex.Message}");
-                return StatusCode(500, "An error occurred while adding the TemperatureHumiditySensor.");
-            }
-        }
+        //         PeripheralManager.Instance.AddPeripheral(config);
+        //         return Ok($"TemperatureHumiditySensor with UUID {uuid} added successfully.");
+        //     }
+        //     catch (Exception ex)
+        //     {
+        //         Console.WriteLine($"Error adding TemperatureHumiditySensor: {ex.Message}");
+        //         return StatusCode(500, "An error occurred while adding the TemperatureHumiditySensor.");
+        //     }
+        // }
 
-        [HttpPost("addTemperatureControl")]
-        public IActionResult AddTemperatureControl()
-        {
-            string uuid = Guid.NewGuid().ToString(); 
+        // [HttpPost("addTemperatureControl")]
+        // public IActionResult AddTemperatureControl()
+        // {
+        //     string uuid = Guid.NewGuid().ToString();
 
-            try
-            {
-                var config = new PeripheralConfig
-                {
-                    PeripheralType = "TemperatureControl",
-                    Uuid = uuid,
-                    Url = $"ws://placeholder-temperature-control-{uuid}.local"
-                };
+        //     try
+        //     {
+        //         var config = new PeripheralConfig
+        //         {
+        //             PeripheralType = "TemperatureControl",
+        //             Uuid = uuid,
+        //             Url = $"ws://placeholder-temperature-control-{uuid}.local"
+        //         };
 
-                PeripheralManager.Instance.AddPeripheral(config);
-                return Ok($"TemperatureControl with UUID {uuid} added successfully.");
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"Error adding TemperatureControl: {ex.Message}");
-                return StatusCode(500, "An error occurred while adding the TemperatureControl.");
-            }
-        }
+        //         PeripheralManager.Instance.AddPeripheral(config);
+        //         return Ok($"TemperatureControl with UUID {uuid} added successfully.");
+        //     }
+        //     catch (Exception ex)
+        //     {
+        //         Console.WriteLine($"Error adding TemperatureControl: {ex.Message}");
+        //         return StatusCode(500, "An error occurred while adding the TemperatureControl.");
+        //     }
+        // }
+
+        // [HttpPost("addLedControl")]
+        // public IActionResult AddLedControl([FromBody] LedControlRequest request)
+        // {
+        //     if (request == null || string.IsNullOrEmpty(request.Uuid) || string.IsNullOrEmpty(request.Url))
+        //     {
+        //         return BadRequest("UUID and URL are required.");
+        //     }
+
+        //     try
+        //     {
+        //         var config = new PeripheralConfig
+        //         {
+        //             PeripheralType = "LedControl",
+        //             Uuid = request.Uuid,
+        //             Url = request.Url
+        //         };
+
+        //         PeripheralManager.Instance.AddPeripheral(config);
+        //         return Ok($"LedControl with UUID {request.Uuid} added successfully.");
+        //     }
+        //     catch (Exception ex)
+        //     {
+        //         Console.WriteLine($"Error adding LedControl: {ex.Message}");
+        //         return StatusCode(500, "An error occurred while adding the LedControl.");
+        //     }
+        // }
 
 
+        // public class LedControlRequest
+        // {
+        //     public string Uuid { get; set; } = string.Empty;
+        //     public string Url { get; set; } = string.Empty;
+        // }
         
+        [HttpPost("refreshPeripherals")]
+        public async Task<IActionResult> RefreshPeripherals([FromBody] List<PeripheralConfig> peripherals)
+        {
+            try
+            {
+                await PeripheralManager.Instance.RefreshPeripherals(peripherals);
+                return Ok("Peripherals refreshed successfully.");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Error refreshing peripherals: {ex.Message}");
+                return StatusCode(500, "An error occurred while refreshing peripherals.");
+            }
+        }
+
+
+
         [HttpDelete("remove")]
         public IActionResult RemovePeripheral([FromQuery] string uuid)
         {

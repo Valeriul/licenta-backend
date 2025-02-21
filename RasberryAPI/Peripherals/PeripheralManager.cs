@@ -16,6 +16,7 @@ namespace RasberryAPI.Peripherals
             {
                 "temperaturehumiditysensor" => new TemperatureHumiditySensor(config.Uuid, config.Url),
                 "temperaturecontrol" => new TemperatureControl(config.Uuid, config.Url),
+                "led" => new LedControl(config.Uuid, config.Url),
                 _ => null
             };
         }
@@ -23,7 +24,7 @@ namespace RasberryAPI.Peripherals
 
     public sealed class PeripheralManager
     {
-        
+
         private static readonly Lazy<PeripheralManager> _instance = new Lazy<PeripheralManager>(() => new PeripheralManager());
         public static PeripheralManager Instance => _instance.Value;
 
@@ -32,14 +33,14 @@ namespace RasberryAPI.Peripherals
 
         private readonly string filePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Peripherals", "peripherals.json");
 
-        
+
         private PeripheralManager()
         {
             _peripherals = new List<IPeripheral>();
             _peripheralFactory = new PeripheralFactory();
         }
 
-        
+
         public void InitializeFromJson()
         {
             try
@@ -119,7 +120,7 @@ namespace RasberryAPI.Peripherals
 
         public async void NotifyPeripheralAdded(IPeripheral addedPeripheral)
         {
-            
+
             var message = new
             {
                 type = "peripheralAdded",
@@ -139,7 +140,7 @@ namespace RasberryAPI.Peripherals
 
         public async void NotifyPeripheralRemoved(string uuid)
         {
-            
+
             var message = new
             {
                 type = "peripheralRemoved",
@@ -169,13 +170,34 @@ namespace RasberryAPI.Peripherals
             return string.Empty;
         }
 
+        public async Task RefreshPeripherals(List<PeripheralConfig> peripherals)
+        {
+            try
+            {
+                var uuids = peripherals.Select(p => p.Uuid).ToList();
+                var existingUuids = _peripherals.Select(p => p.UUId).ToList();
+
+                foreach (var config in peripherals)
+                {
+                    if (!existingUuids.Contains(config.Uuid))
+                    {
+                        await Task.Run(() => AddPeripheral(config));
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Error refreshing peripherals: {ex.Message}");
+            }
+        }
+
         public IEnumerable<string> GetAllPeripherals()
         {
             if (_peripherals.Count == 0)
             {
                 return null;
             }
-            
+
             var jsonO = _peripherals.Select(p => new
             {
                 uuid = p.UUId,
@@ -198,7 +220,7 @@ namespace RasberryAPI.Peripherals
 
         public IEnumerable<string> GetAllSensorData()
         {
-            
+
             var jsonO = _peripherals.Where(p => p is Sensor).Select(p => new
             {
                 uuid = p.UUId,
@@ -206,10 +228,10 @@ namespace RasberryAPI.Peripherals
             });
 
             return new List<string> { JsonConvert.SerializeObject(jsonO) };
-        } 
+        }
 
-        
-        
+
+
         public void RemoveAllPeripherals()
         {
             for (int i = _peripherals.Count - 1; i >= 0; i--)
@@ -218,7 +240,7 @@ namespace RasberryAPI.Peripherals
             }
             File.WriteAllText(filePath, "[]");
         }
-  }
+    }
 
     public class PeripheralConfig
     {

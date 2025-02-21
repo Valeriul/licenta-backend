@@ -13,10 +13,16 @@ namespace RasberryAPI.Peripherals
     public class TemperatureControl : Control
     {
         private static readonly Random random = new Random();
+
+        public string Status { get; set; }
     
         public TemperatureControl(string uuid, string url) : base(uuid, url) {
             BatteryLevel = random.Next(0, 100);
             Status = random.Next(18, 30).ToString();
+        }
+
+        public override void SetState(string state)
+        {
         }
 
         public override string GetData()

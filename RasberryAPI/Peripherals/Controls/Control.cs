@@ -15,8 +15,9 @@ namespace RasberryAPI.Peripherals
     {
         public string UUId { get; set; }
         public string Url { get; set; }
+
+        public string State { get; set; }
         public int BatteryLevel { get; set; }
-        public string Status { get; set; }
 
         public Control(string uuid, string url)
         {
@@ -25,6 +26,8 @@ namespace RasberryAPI.Peripherals
         }
 
         public abstract string GetData();
+
+        public abstract void SetState(string state);
 
         public abstract void HandleRequest(string request);
     }
