@@ -22,29 +22,89 @@ namespace BackendAPI.Services
 
         public async Task<bool> InitializePeripheral(ulong id_user)
         {
-            var result = await CommunicationManager.Instance.HandleCommand(new CommandRequest
+            try
             {
-                CommandType = "get_all_peripherals",
-                id_user = id_user,
-            });
-
-            result = result.Replace("[\"", "[").Replace("\"]", "]").Replace("\\\"", "\"").Replace("[[", "[").Replace("]]", "]");
-            var peripherals = JsonConvert.DeserializeObject<List<Dictionary<string, object>>>(result);
-
-            foreach (var peripheral in peripherals)
-            {
+                string result;
                 try
                 {
-                    await AddPeripheral(id_user, peripheral["uuid"].ToString(), peripheral["type"].ToString());
+                    result = await CommunicationManager.Instance.HandleCommand(new CommandRequest
+                    {
+                        CommandType = "get_all_peripherals",
+                        id_user = id_user,
+                    });
                 }
-                catch (System.Exception e)
+                catch (Exception ex)
                 {
-                    System.Console.WriteLine(e.Message);
+                    Console.WriteLine($"Error executing HandleCommand: {ex.Message}");
+                    return false;
                 }
-            }
 
-            return true;
+                if (string.IsNullOrWhiteSpace(result))
+                {
+                    Console.WriteLine("Received an empty result from HandleCommand.");
+                    return false;
+                }
+
+                // Normalize the result string.
+                result = result.Replace("[\"", "[").Replace("\"]", "]")
+                               .Replace("\\\"", "\"").Replace("[[", "[")
+                               .Replace("]]", "]");
+
+                List<Dictionary<string, object>> peripherals;
+                try
+                {
+                    peripherals = JsonConvert.DeserializeObject<List<Dictionary<string, object>>>(result);
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"Error deserializing peripherals: {ex.Message}");
+                    return false;
+                }
+
+                if (peripherals == null || peripherals.Count == 0)
+                {
+                    Console.WriteLine("No peripherals found after deserialization.");
+                    return false;
+                }
+
+                foreach (var peripheral in peripherals)
+                {
+                    if (!peripheral.ContainsKey("uuid") || !peripheral.ContainsKey("type"))
+                    {
+                        Console.WriteLine("Peripheral dictionary is missing required keys 'uuid' or 'type'.");
+                        continue;
+                    }
+
+                    string uuid = peripheral["uuid"]?.ToString();
+                    string type = peripheral["type"]?.ToString();
+
+                    if (string.IsNullOrEmpty(uuid) || string.IsNullOrEmpty(type))
+                    {
+                        Console.WriteLine("Peripheral 'uuid' or 'type' is null or empty.");
+                        continue;
+                    }
+
+                    try
+                    {
+                        await AddPeripheral(id_user, uuid, type);
+                    }
+                    catch (Exception e)
+                    {
+                        Console.WriteLine($"Error adding peripheral with uuid '{uuid}': {e.Message}");
+                        // Optionally, you can decide to return false here if adding a peripheral is critical.
+                    }
+                }
+
+                return true;
+            }
+            catch (Exception ex)
+            {
+                // Catch-all for any unforeseen exceptions.
+                Console.WriteLine($"Unhandled exception in InitializePeripheral: {ex.Message}");
+                return false;
+            }
         }
+
 
         public async Task<object> GetSensorData(ulong id_user)
         {
