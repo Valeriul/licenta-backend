@@ -22,89 +22,29 @@ namespace BackendAPI.Services
 
         public async Task<bool> InitializePeripheral(ulong id_user)
         {
-            try
+            var result = await CommunicationManager.Instance.HandleCommand(new CommandRequest
             {
-                string result;
+                CommandType = "get_all_peripherals",
+                id_user = id_user,
+            });
+
+            result = result.Replace("[\"", "[").Replace("\"]", "]").Replace("\\\"", "\"").Replace("[[", "[").Replace("]]", "]");
+            var peripherals = JsonConvert.DeserializeObject<List<Dictionary<string, object>>>(result);
+
+            foreach (var peripheral in peripherals)
+            {
                 try
                 {
-                    result = await CommunicationManager.Instance.HandleCommand(new CommandRequest
-                    {
-                        CommandType = "get_all_peripherals",
-                        id_user = id_user,
-                    });
+                    await AddPeripheral(id_user, peripheral["uuid"].ToString(), peripheral["type"].ToString());
                 }
-                catch (Exception ex)
+                catch (System.Exception e)
                 {
-                    Console.WriteLine($"Error executing HandleCommand: {ex.Message}");
-                    return false;
+                    System.Console.WriteLine(e.Message);
                 }
-
-                if (string.IsNullOrWhiteSpace(result))
-                {
-                    Console.WriteLine("Received an empty result from HandleCommand.");
-                    return false;
-                }
-
-                // Normalize the result string.
-                result = result.Replace("[\"", "[").Replace("\"]", "]")
-                               .Replace("\\\"", "\"").Replace("[[", "[")
-                               .Replace("]]", "]");
-
-                List<Dictionary<string, object>> peripherals;
-                try
-                {
-                    peripherals = JsonConvert.DeserializeObject<List<Dictionary<string, object>>>(result);
-                }
-                catch (Exception ex)
-                {
-                    Console.WriteLine($"Error deserializing peripherals: {ex.Message}");
-                    return false;
-                }
-
-                if (peripherals == null || peripherals.Count == 0)
-                {
-                    Console.WriteLine("No peripherals found after deserialization.");
-                    return false;
-                }
-
-                foreach (var peripheral in peripherals)
-                {
-                    if (!peripheral.ContainsKey("uuid") || !peripheral.ContainsKey("type"))
-                    {
-                        Console.WriteLine("Peripheral dictionary is missing required keys 'uuid' or 'type'.");
-                        continue;
-                    }
-
-                    string uuid = peripheral["uuid"]?.ToString();
-                    string type = peripheral["type"]?.ToString();
-
-                    if (string.IsNullOrEmpty(uuid) || string.IsNullOrEmpty(type))
-                    {
-                        Console.WriteLine("Peripheral 'uuid' or 'type' is null or empty.");
-                        continue;
-                    }
-
-                    try
-                    {
-                        await AddPeripheral(id_user, uuid, type);
-                    }
-                    catch (Exception e)
-                    {
-                        Console.WriteLine($"Error adding peripheral with uuid '{uuid}': {e.Message}");
-                        // Optionally, you can decide to return false here if adding a peripheral is critical.
-                    }
-                }
-
-                return true;
             }
-            catch (Exception ex)
-            {
-                // Catch-all for any unforeseen exceptions.
-                Console.WriteLine($"Unhandled exception in InitializePeripheral: {ex.Message}");
-                return false;
-            }
+
+            return true;
         }
-
 
         public async Task<object> GetSensorData(ulong id_user)
         {
@@ -130,161 +70,54 @@ namespace BackendAPI.Services
 
         public async Task<string> GetLoadingData(ulong id_user)
         {
+            var allPeripheralsJson = await GetAllPeripherals(id_user);
+            var allDataJson = await GetAllData(id_user);
+
+            if (allPeripheralsJson == "[]")
+            {
+                await InitializePeripheral(id_user);
+                allPeripheralsJson = await GetAllPeripherals(id_user);
+            }
+
+            var peripherals = new List<Dictionary<string, object>>();
+            var data = new List<Dictionary<string, object>>();
             try
             {
-                // Attempt to get data from external sources.
-                string allPeripheralsJson = string.Empty;
-                string allDataJson = string.Empty;
-                try
-                {
-                    allPeripheralsJson = await GetAllPeripherals(id_user);
-                    allDataJson = await GetAllData(id_user);
-                }
-                catch (Exception ex)
-                {
-                    // Log error here if needed.
-                    throw new Exception("Error fetching peripherals or data.", ex);
-                }
+                peripherals = JsonConvert.DeserializeObject<List<Dictionary<string, object>>>(allPeripheralsJson);
 
-                // If no peripherals, attempt to initialize and re-fetch.
-                if (allPeripheralsJson == "[]")
-                {
-                    try
-                    {
-                        await InitializePeripheral(id_user);
-                        allPeripheralsJson = await GetAllPeripherals(id_user);
-                    }
-                    catch (Exception ex)
-                    {
-                        throw new Exception("Error initializing peripherals.", ex);
-                    }
-                }
 
-                // Validate that JSON strings are not null or empty.
-                if (string.IsNullOrWhiteSpace(allPeripheralsJson) ||
-                    string.IsNullOrWhiteSpace(allDataJson))
-                {
-                    throw new Exception("One or more JSON responses were empty.");
-                }
+                var rawData = JsonConvert.DeserializeObject<List<string>>(allDataJson);
 
-                // Deserialize peripherals.
-                List<Dictionary<string, object>> peripherals;
-                try
-                {
-                    peripherals = JsonConvert.DeserializeObject<List<Dictionary<string, object>>>(allPeripheralsJson);
-                }
-                catch (Exception ex)
-                {
-                    throw new Exception("Failed to deserialize peripherals JSON.", ex);
-                }
 
-                // Deserialize allDataJson into a list of strings.
-                List<string> rawData;
-                try
-                {
-                    rawData = JsonConvert.DeserializeObject<List<string>>(allDataJson);
-                }
-                catch (Exception ex)
-                {
-                    throw new Exception("Failed to deserialize data JSON into list of strings.", ex);
-                }
-
-                if (rawData == null || rawData.Count == 0)
-                {
-                    throw new Exception("No raw data available after deserialization.");
-                }
-
-                // Deserialize the first element of rawData into a list of dictionaries.
-                List<Dictionary<string, object>> data;
-                try
-                {
-                    data = JsonConvert.DeserializeObject<List<Dictionary<string, object>>>(rawData[0]);
-                }
-                catch (Exception ex)
-                {
-                    throw new Exception("Failed to deserialize raw data element.", ex);
-                }
-
-                // Ensure our deserialized data is valid.
-                if (peripherals == null)
-                {
-                    throw new Exception("Peripheral data is null after deserialization.");
-                }
-                if (data == null)
-                {
-                    throw new Exception("Data is null after deserialization.");
-                }
-
-                // Process each peripheral and match data by UUID.
-                foreach (var peripheral in peripherals)
-                {
-                    // Ensure the key exists.
-                    if (!peripheral.ContainsKey("uuid_Peripheral"))
-                    {
-                        peripheral["data"] = null;
-                        continue;
-                    }
-
-                    string peripheralUuid = peripheral["uuid_Peripheral"]?.ToString();
-                    if (string.IsNullOrEmpty(peripheralUuid))
-                    {
-                        peripheral["data"] = null;
-                        continue;
-                    }
-
-                    var matchingData = data.FirstOrDefault(d =>
-                    {
-                        // Check that the key exists and matches.
-                        return d.ContainsKey("uuid") &&
-                               d["uuid"]?.ToString() == peripheralUuid;
-                    });
-
-                    if (matchingData != null)
-                    {
-                        // If there is a "data" field, attempt to deserialize it.
-                        if (matchingData.ContainsKey("data") && matchingData["data"] != null)
-                        {
-                            try
-                            {
-                                peripheral["data"] = JsonConvert.DeserializeObject(
-                                    matchingData["data"].ToString() ?? "{}"
-                                );
-                            }
-                            catch (Exception ex)
-                            {
-                                // Log or handle the error for this particular peripheral.
-                                peripheral["data"] = null;
-                            }
-                        }
-                        else
-                        {
-                            peripheral["data"] = null;
-                        }
-                    }
-                    else
-                    {
-                        peripheral["data"] = null;
-                    }
-                }
-
-                // Finally, serialize the peripherals back to JSON.
-                try
-                {
-                    return JsonConvert.SerializeObject(peripherals);
-                }
-                catch (Exception ex)
-                {
-                    throw new Exception("Failed to serialize the final peripherals list.", ex);
-                }
+                data = JsonConvert.DeserializeObject<List<Dictionary<string, object>>>(rawData[0]);
             }
-            catch (Exception ex)
+            catch (System.Exception e)
             {
-                // Global catch-all. In production you might log this exception.
-                // You can also choose to re-throw it instead of returning an error string.
-                return $"{{\"error\":\"{ex.Message}\"}}";
+                System.Console.WriteLine(e.Message);
+                return JsonConvert.SerializeObject(new List<Dictionary<string, object>>());
             }
-        }
 
+
+            foreach (var peripheral in peripherals)
+            {
+                var matchingData = data.FirstOrDefault(d => d["uuid"].ToString() == peripheral["uuid_Peripheral"].ToString());
+                if (matchingData != null)
+                {
+
+                    peripheral["data"] = matchingData["data"] != null
+                        ? JsonConvert.DeserializeObject(matchingData["data"].ToString() ?? "{}")
+                        : null;
+                }
+                else
+                {
+
+                    peripheral["data"] = null;
+                }
+            }
+
+
+            return JsonConvert.SerializeObject(peripherals);
+        }
         public async Task<string> ControlPeripheral(ulong id_user, BackendAPI.Models.ControlCommand data)
         {
             var result = await CommunicationManager.Instance.HandleCommand(new CommandRequest
