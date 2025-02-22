@@ -79,13 +79,23 @@ namespace BackendAPI.Services
                 allPeripheralsJson = await GetAllPeripherals(id_user);
             }
 
-            var peripherals = JsonConvert.DeserializeObject<List<Dictionary<string, object>>>(allPeripheralsJson);
+            var peripherals = new List<Dictionary<string, object>>();
+            var data = new List<Dictionary<string, object>>();
+            try
+            {
+                peripherals = JsonConvert.DeserializeObject<List<Dictionary<string, object>>>(allPeripheralsJson);
 
 
-            var rawData = JsonConvert.DeserializeObject<List<string>>(allDataJson);
+                var rawData = JsonConvert.DeserializeObject<List<string>>(allDataJson);
 
 
-            var data = JsonConvert.DeserializeObject<List<Dictionary<string, object>>>(rawData[0]);
+                data = JsonConvert.DeserializeObject<List<Dictionary<string, object>>>(rawData[0]);
+            }
+            catch (System.Exception e)
+            {
+                System.Console.WriteLine(e.Message);
+                return JsonConvert.SerializeObject(new List<Dictionary<string, object>>());
+            }
 
 
             foreach (var peripheral in peripherals)
