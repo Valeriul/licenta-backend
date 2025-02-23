@@ -92,7 +92,7 @@ namespace BackendAPI.Services
                 }
                 else
                 {
-                    htmlBody = htmlBody.Replace("{{url}}", "https://licenta.stefandanieluta.ro/verify-user/?=" + salt);
+                    htmlBody = htmlBody.Replace("{{url}}", "https://licenta.stefandanieluta.ro/verify-user?s=" + salt);
                 }
 
                 

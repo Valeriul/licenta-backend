@@ -9,7 +9,6 @@ namespace BackendAPI.Models
         public string Salt { get; set; }
 
         [Required]
-        [StringLength(12)]
         public string CentralURL { get; set; }
     }
 }
