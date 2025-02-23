@@ -215,6 +215,17 @@ namespace BackendAPI.Services
                 { "@p_newName", newName }
             };
 
+            lock(userDataLock)
+            {
+                var peripherals = userData[id_user]["peripherals"] as List<Dictionary<string, object>>;
+                var peripheral = peripherals.FirstOrDefault(p => p["uuid_Peripheral"].ToString() == uuid);
+                if(peripheral != null)
+                {
+                    peripheral["name"] = newName;
+                    userData[id_user]["peripherals"] = peripherals;
+                }
+            }
+
             var queryResult = await MySqlDatabaseService.Instance.ExecuteNonQueryAsync("UPDATE peripherals p JOIN users u ON p.uuid_Central = u.uuid_Central SET p.name = @p_newName WHERE p.uuid_Peripheral = @p_uuid AND u.id_user = @p_id_user;", parameters);
             return true;
 
@@ -228,6 +239,17 @@ namespace BackendAPI.Services
                 { "@p_uuid", uuid },
                 { "@p_newLocation", newLocation }
             };
+
+            lock(userDataLock)
+            {
+                var peripherals = userData[id_user]["peripherals"] as List<Dictionary<string, object>>;
+                var peripheral = peripherals.FirstOrDefault(p => p["uuid_Peripheral"].ToString() == uuid);
+                if(peripheral != null)
+                {
+                    peripheral["location"] = newLocation;
+                    userData[id_user]["peripherals"] = peripherals;
+                }
+            }
 
             var queryResult = await MySqlDatabaseService.Instance.ExecuteNonQueryAsync("UPDATE peripherals p JOIN users u ON p.uuid_Central = u.uuid_Central SET p.location = @p_newLocation WHERE p.uuid_Peripheral = @p_uuid AND u.id_user = @p_id_user;", parameters);
             return true;
@@ -245,6 +267,17 @@ namespace BackendAPI.Services
                     { "@p_uuid", peripheral.Uuid },
                     { "@p_gridPosition", peripheral.Grid_position }
                 };
+
+                lock(userDataLock)
+                {
+                    var peripherals = userData[request.id_user]["peripherals"] as List<Dictionary<string, object>>;
+                    var peripheralData = peripherals.FirstOrDefault(p => p["uuid_Peripheral"].ToString() == peripheral.Uuid);
+                    if(peripheralData != null)
+                    {
+                        peripheralData["grid_position"] = peripheral.Grid_position;
+                        userData[request.id_user]["peripherals"] = peripherals;
+                    }
+                }
 
                 var queryResult = await MySqlDatabaseService.Instance.ExecuteNonQueryAsync("UPDATE peripherals p JOIN users u ON p.uuid_Central = u.uuid_Central SET p.grid_position = @p_gridPosition WHERE p.uuid_Peripheral = @p_uuid AND u.id_user = @p_id_user;", parameters);
             }
