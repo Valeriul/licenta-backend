@@ -14,27 +14,13 @@ namespace BackendAPI.Controllers
         private readonly PeripheralService _peripheralService;
         public PeripheralController()
         {
-            _peripheralService = new PeripheralService();
+            _peripheralService = PeripheralService.Instance;
         }
 
         [HttpGet("getLoadingData")]
         public async Task<IActionResult> GetLoadingData([FromQuery] ulong id_user)
         {
             var result = await _peripheralService.GetLoadingData(id_user);
-            return Ok(result);
-        }
-
-        [HttpGet("initializePeripheral")]
-        public async Task<IActionResult> InitializePeripheral([FromQuery] ulong id_user)
-        {
-            var result = await _peripheralService.InitializePeripheral(id_user);
-            return Ok(result);
-        }
-
-        [HttpGet("getSensorData")]
-        public async Task<IActionResult> GetSensorData([FromQuery] ulong id_user)
-        {
-            var result = await _peripheralService.GetSensorData(id_user);
             return Ok(result);
         }
 

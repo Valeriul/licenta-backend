@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Collections.Concurrent;
 using System.Threading.Tasks;
 using BackendAPI.Models;
 using Newtonsoft.Json;
@@ -7,7 +8,114 @@ namespace BackendAPI.Services
 {
     public class PeripheralService
     {
-        public PeripheralService() { }
+        private static readonly Lazy<PeripheralService> _instance = new Lazy<PeripheralService>(() => new PeripheralService());
+        public static PeripheralService Instance => _instance.Value;
+
+        private static readonly ConcurrentDictionary<ulong, Dictionary<string, object>> userData = new ConcurrentDictionary<ulong, Dictionary<string, object>>();
+        private static readonly object userDataLock = new object();
+
+        private PeripheralService(){}
+        
+
+        public async void HandleConnectionSuccess(ulong id_user)
+        {
+            await InitializePeripheral(id_user);
+            var peripheralsJson = await GetAllPeripherals(id_user);
+            var peripheralsList = JsonConvert.DeserializeObject<List<Dictionary<string, object>>>(peripheralsJson);
+
+            peripheralsList.ForEach(peripheral =>
+            {
+                peripheral.Add("data", null);
+            });
+
+            lock (userDataLock)
+            {
+                // Ensure the userData entry exists
+                if (!userData.ContainsKey(id_user))
+                {
+                    userData[id_user] = new Dictionary<string, object>();
+                }
+
+                // Store the peripherals
+                userData[id_user]["peripherals"] = peripheralsList;
+
+                // Stop any previous task
+                StopGatheringTask(id_user);
+
+                // Create a new cancellation token source
+                var cancellationTokenSource = new CancellationTokenSource();
+                userData[id_user]["cancellationToken"] = cancellationTokenSource;
+
+                Task.Run(async () =>
+                {
+                    while (!cancellationTokenSource.Token.IsCancellationRequested)
+                    {
+                        await GatherData(id_user);
+                    }
+                }, cancellationTokenSource.Token);
+            }
+        }
+
+        private async Task GatherData(ulong id_user)
+        {
+            var allDataJson = await GetAllData(id_user);
+
+            var data = new List<Dictionary<string, object>>();
+            try
+            {
+                var rawData = JsonConvert.DeserializeObject<List<string>>(allDataJson);
+                data = JsonConvert.DeserializeObject<List<Dictionary<string, object>>>(rawData[0]);
+            }
+            catch (System.Exception e)
+            {
+                System.Console.WriteLine(e.Message);
+            }
+
+            lock (userDataLock)
+            {
+                if (!userData.TryGetValue(id_user, out var user))
+                {
+                    return;
+                }
+
+                var peripherals = user["peripherals"] as List<Dictionary<string, object>>;
+                foreach (var peripheral in peripherals)
+                {
+                    var matchingData = data.FirstOrDefault(d => d["uuid"].ToString() == peripheral["uuid_Peripheral"].ToString());
+                    if (matchingData != null)
+                    {
+                        peripheral["data"] = matchingData["data"] != null
+                            ? JsonConvert.DeserializeObject(matchingData["data"].ToString() ?? "{}")
+                            : null;
+                    }
+                }
+
+                userData[id_user] = user;
+            }
+        }
+
+        public void HandleConnectionFailure(ulong id_user)
+        {
+            lock (userDataLock)
+            {
+                // Stop the running task and remove user entry
+                StopGatheringTask(id_user);
+                userData.TryRemove(id_user, out _);
+            }
+        }
+
+        private void StopGatheringTask(ulong id_user)
+        {
+            if (userData.TryGetValue(id_user, out var user) && user.ContainsKey("cancellationToken"))
+            {
+                var cancellationTokenSource = user["cancellationToken"] as CancellationTokenSource;
+                cancellationTokenSource?.Cancel();
+                cancellationTokenSource?.Dispose();
+                user.Remove("cancellationToken");
+                System.Console.WriteLine($"[INFO] Stopped data-gathering task for user {id_user}");
+            }
+        }
+
         public async Task<string> GetAllData(ulong id_user)
         {
 
@@ -70,53 +178,17 @@ namespace BackendAPI.Services
 
         public async Task<string> GetLoadingData(ulong id_user)
         {
-            var allPeripheralsJson = await GetAllPeripherals(id_user);
-            var allDataJson = await GetAllData(id_user);
-
-            if (allPeripheralsJson == "[]")
+            if(!userData.ContainsKey(id_user))
             {
-                await InitializePeripheral(id_user);
-                allPeripheralsJson = await GetAllPeripherals(id_user);
+                WebSocketManager.Instance.TryReconnectWebSocket(id_user);
+                return string.Empty;
             }
 
-            var peripherals = new List<Dictionary<string, object>>();
-            var data = new List<Dictionary<string, object>>();
-            try
+            return await Task.Run(() =>
             {
-                peripherals = JsonConvert.DeserializeObject<List<Dictionary<string, object>>>(allPeripheralsJson);
-
-
-                var rawData = JsonConvert.DeserializeObject<List<string>>(allDataJson);
-
-
-                data = JsonConvert.DeserializeObject<List<Dictionary<string, object>>>(rawData[0]);
-            }
-            catch (System.Exception e)
-            {
-                System.Console.WriteLine(e.Message);
-                return JsonConvert.SerializeObject(new List<Dictionary<string, object>>());
-            }
-
-
-            foreach (var peripheral in peripherals)
-            {
-                var matchingData = data.FirstOrDefault(d => d["uuid"].ToString() == peripheral["uuid_Peripheral"].ToString());
-                if (matchingData != null)
-                {
-
-                    peripheral["data"] = matchingData["data"] != null
-                        ? JsonConvert.DeserializeObject(matchingData["data"].ToString() ?? "{}")
-                        : null;
-                }
-                else
-                {
-
-                    peripheral["data"] = null;
-                }
-            }
-
-
-            return JsonConvert.SerializeObject(peripherals);
+                var peripherals = userData[id_user]["peripherals"] as List<Dictionary<string, object>>;
+                return JsonConvert.SerializeObject(peripherals);
+            });
         }
         public async Task<string> ControlPeripheral(ulong id_user, BackendAPI.Models.ControlCommand data)
         {

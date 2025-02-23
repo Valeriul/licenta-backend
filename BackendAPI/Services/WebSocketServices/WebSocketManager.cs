@@ -12,6 +12,18 @@ namespace BackendAPI.Services
 
         private readonly ConcurrentDictionary<ulong, WebSocketClient> _clients = new ConcurrentDictionary<ulong, WebSocketClient>();
 
+        // Event handlers for connection success and failure
+        public event Action<ulong>? OnConnectionSuccess;
+        public event Action<ulong>? OnConnectionFailure;
+
+        public WebSocketManager()
+        {
+            PeripheralService peripheralService = PeripheralService.Instance;
+
+            OnConnectionSuccess += (id) => PeripheralService.Instance.HandleConnectionSuccess(id);
+            OnConnectionFailure += (id) => PeripheralService.Instance.HandleConnectionFailure(id);
+        }
+
         public async Task InitializeAsync()
         {
             if (MySqlDatabaseService.Instance == null)
@@ -19,7 +31,6 @@ namespace BackendAPI.Services
                 throw new InvalidOperationException("MySqlDatabaseService must be initialized before WebSocketManager.");
             }
 
-            
             var registeredUrls = await MySqlDatabaseService.Instance.ExecuteQueryAsync("SELECT id_user, uuid_Central FROM users");
 
             foreach (var url in registeredUrls)
@@ -38,92 +49,39 @@ namespace BackendAPI.Services
 
         public async Task<string> AddWebSocketAsync(ulong id_user, string url)
         {
-            
             if (string.IsNullOrEmpty(url))
             {
                 return "Invalid WebSocket URL.";
             }
 
-            
             if (_clients.ContainsKey(id_user))
             {
                 return $"WebSocket already exists: {url}";
             }
 
-            
             var client = new WebSocketClient(id_user, url);
-            _clients[id_user] = client; 
+
+            // Subscribe to the client's connection events
+            client.OnConnected += (id) => OnConnectionSuccess?.Invoke(id);
+            client.OnConnectionFailed += (id) => OnConnectionFailure?.Invoke(id);
+
+            _clients[id_user] = client;
 
             try
             {
-                int retryCount = 0;
-                const int maxRetries = 3;
-                const int delayMilliseconds = 2000;
-
-                while (retryCount < maxRetries)
-                {
-                    try
-                    {
-                        await client.ConnectAsync();
-                        break;
-                    }
-                    catch (System.Net.WebSockets.WebSocketException ex) when (ex.InnerException is System.Net.Sockets.SocketException)
-                    {
-                        retryCount++;
-                        if (retryCount >= maxRetries)
-                        {
-                            Console.WriteLine($"Failed to connect WebSocket for user {id_user} after {maxRetries} attempts: {ex.Message}");
-                            throw;
-                        }
-                        Console.WriteLine($"Retrying connection for user {id_user} in {delayMilliseconds}ms...");
-                        await Task.Delay(delayMilliseconds);
-                    }
-                }
+                await client.ConnectAsync();
                 return "WebSocket client registered successfully.";
             }
-            catch (Exception ex)
+            catch
             {
-                Console.WriteLine($"Failed to connect WebSocket for user {id_user}: {ex.Message}");
                 return "Failed to connect WebSocket.";
             }
         }
-
-        
-        private async Task RegisterPeripheralsAsync(List<PeripheralRegister> peripherals, string websocketUri)
-        {
-            foreach (var peripheral in peripherals)
-            {
-                try
-                {
-                    await MySqlDatabaseService.Instance.ExecuteQueryAsync(
-                        "INSERT INTO peripherals(uuid_Peripheral, type, uuid_Central) VALUES(@uuid_Peripheral, @type, @uuid_Central) " +
-                        "ON DUPLICATE KEY UPDATE uuid_Peripheral = @uuid_Peripheral, uuid_Central = @uuid_Central",
-                        new Dictionary<string, object>
-                        {
-                    { "@uuid_Peripheral", peripheral.uuid },
-                    { "@type", peripheral.type },
-                    { "@uuid_Central", await urlToUuid(websocketUri) }
-                        });
-                }
-                catch (Exception ex)
-                {
-                    Console.WriteLine($"Error registering peripheral {peripheral.uuid}: {ex.Message}");
-                }
-            }
-        }
-
-
-        public async Task<string> urlToUuid(string url)
-        {
-            return await Task.Run(() => Convert.ToBase64String(Encoding.UTF8.GetBytes(url)));
-        }
-
 
         public async Task<string?> SendMessageAsync(ulong id_user, string message)
         {
             if (_clients.TryGetValue(id_user, out var client))
             {
-                
                 if (client.IsConnected)
                 {
                     return await client.SendMessageAndWaitForResponseAsync(message);
@@ -144,10 +102,24 @@ namespace BackendAPI.Services
             }
             else
             {
-                
                 Console.WriteLine($"WebSocket client not found for user {id_user}. Registering...");
                 await AddWebSocketAsync(id_user, message);
-                return null;
+                return await SendMessageAsync(id_user, message);
+            }
+        }
+
+        public async Task TryReconnectWebSocket(ulong id_user)
+        {
+            if (_clients.TryGetValue(id_user, out var client))
+            {
+                try
+                {
+                    await client.ConnectAsync();
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"Failed to reconnect WebSocket for user {id_user}: {ex.Message}");
+                }
             }
         }
 

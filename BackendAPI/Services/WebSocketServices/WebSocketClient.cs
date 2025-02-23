@@ -9,11 +9,14 @@ namespace BackendAPI.Services
     {
         private ClientWebSocket _clientWebSocket;
         public string WebSocketUri { get; private set; }
-
         public ulong Key { get; private set; }
         public bool IsConnected => _clientWebSocket.State == WebSocketState.Open;
 
         private readonly ConcurrentQueue<TaskCompletionSource<string?>> _responseQueue;
+
+        // Events for connection success and failure
+        public event Action<ulong>? OnConnected;
+        public event Action<ulong>? OnConnectionFailed;
 
         public WebSocketClient(ulong key, string url)
         {
@@ -37,16 +40,16 @@ namespace BackendAPI.Services
             try
             {
                 await _clientWebSocket.ConnectAsync(new Uri(WebSocketUri), CancellationToken.None);
-                Console.WriteLine($"Connected to {WebSocketUri}");
+                OnConnected?.Invoke(Key); // Trigger success event
+
                 _ = Task.Run(ListenForMessagesAsync);
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"Failed to connect to WebSocket: {ex.Message}");
+                OnConnectionFailed?.Invoke(Key);
                 throw;
             }
         }
-
 
         public async Task<string?> SendMessageAndWaitForResponseAsync(string message)
         {
@@ -90,22 +93,12 @@ namespace BackendAPI.Services
 
         private async Task HandleIncomingMessage(string message)
         {
-            
             if (_responseQueue.TryDequeue(out var responseTask))
             {
-                
-                if (message == "null")
-                {
-                    responseTask.SetResult(null);
-                }
-                else
-                {
-                    responseTask.SetResult(message);
-                }
+                responseTask.SetResult(message == "null" ? null : message);
             }
             else
             {
-                
                 await CommunicationManager.Instance.HandleUnexpectedMessageAsync(Key, message);
             }
         }
@@ -115,7 +108,7 @@ namespace BackendAPI.Services
             if (_clientWebSocket.State == WebSocketState.Open)
             {
                 await _clientWebSocket.CloseAsync(WebSocketCloseStatus.NormalClosure, "Closing connection", CancellationToken.None);
-                Console.WriteLine($"Connection to {WebSocketUri} closed.");
+                Console.WriteLine($"[INFO] Connection to {WebSocketUri} closed.");
             }
         }
     }
