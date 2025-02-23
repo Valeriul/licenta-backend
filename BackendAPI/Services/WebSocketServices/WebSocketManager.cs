@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Text;
 using Newtonsoft.Json;
+using System.Net.WebSockets;
 using BackendAPI.Models;
 
 namespace BackendAPI.Services
@@ -82,7 +83,7 @@ namespace BackendAPI.Services
         {
             if (_clients.TryGetValue(id_user, out var client))
             {
-                if (client.IsConnected)
+                if (client.IsConnected == true)
                 {
                     return await client.SendMessageAndWaitForResponseAsync(message);
                 }

@@ -19,6 +19,7 @@ namespace BackendAPI.Services
 
         public async void HandleConnectionSuccess(ulong id_user)
         {
+            Console.WriteLine("[INFO] Connection success for user " + id_user);
             await InitializePeripheral(id_user);
             var peripheralsJson = await GetAllPeripherals(id_user);
             var peripheralsList = JsonConvert.DeserializeObject<List<Dictionary<string, object>>>(peripheralsJson);
@@ -51,6 +52,7 @@ namespace BackendAPI.Services
                     while (!cancellationTokenSource.Token.IsCancellationRequested)
                     {
                         await GatherData(id_user);
+                        await Task.Delay(3000, cancellationTokenSource.Token);
                     }
                 }, cancellationTokenSource.Token);
             }
@@ -96,6 +98,7 @@ namespace BackendAPI.Services
 
         public void HandleConnectionFailure(ulong id_user)
         {
+            Console.WriteLine("[INFO] Connection failure for user " + id_user);
             lock (userDataLock)
             {
                 // Stop the running task and remove user entry
@@ -181,7 +184,7 @@ namespace BackendAPI.Services
             if(!userData.ContainsKey(id_user))
             {
                 WebSocketManager.Instance.TryReconnectWebSocket(id_user);
-                return string.Empty;
+                return JsonConvert.SerializeObject(new List<Dictionary<string, object>>());
             }
 
             return await Task.Run(() =>
