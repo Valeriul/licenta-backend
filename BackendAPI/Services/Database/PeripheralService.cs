@@ -14,8 +14,8 @@ namespace BackendAPI.Services
         private static readonly ConcurrentDictionary<ulong, Dictionary<string, object>> userData = new ConcurrentDictionary<ulong, Dictionary<string, object>>();
         private static readonly object userDataLock = new object();
 
-        private PeripheralService(){}
-        
+        private PeripheralService() { }
+
 
         public async void HandleConnectionSuccess(ulong id_user)
         {
@@ -65,6 +65,7 @@ namespace BackendAPI.Services
             var data = new List<Dictionary<string, object>>();
             try
             {
+                Console.WriteLine($"[INFO] Raw data for user {id_user}: {allDataJson}");
                 var rawData = JsonConvert.DeserializeObject<List<string>>(allDataJson);
                 data = JsonConvert.DeserializeObject<List<Dictionary<string, object>>>(rawData[0]);
             }
@@ -139,8 +140,20 @@ namespace BackendAPI.Services
                 id_user = id_user,
             });
 
+            if (result == null || result == string.Empty)
+            {
+                Console.WriteLine("[ERROR] Failed to get peripherals for user " + id_user);
+                return false;
+            }
+
             result = result.Replace("[\"", "[").Replace("\"]", "]").Replace("\\\"", "\"").Replace("[[", "[").Replace("]]", "]");
             var peripherals = JsonConvert.DeserializeObject<List<Dictionary<string, object>>>(result);
+
+            if (peripherals == null || peripherals.Count == 0)
+            {
+                Console.WriteLine("[INFO] No peripherals found for user " + id_user);
+                return false;
+            }
 
             foreach (var peripheral in peripherals)
             {
@@ -181,7 +194,7 @@ namespace BackendAPI.Services
 
         public async Task<string> GetLoadingData(ulong id_user)
         {
-            if(!userData.ContainsKey(id_user))
+            if (!userData.ContainsKey(id_user))
             {
                 WebSocketManager.Instance.TryReconnectWebSocket(id_user);
                 return JsonConvert.SerializeObject(new List<Dictionary<string, object>>());
@@ -215,11 +228,11 @@ namespace BackendAPI.Services
                 { "@p_newName", newName }
             };
 
-            lock(userDataLock)
+            lock (userDataLock)
             {
                 var peripherals = userData[id_user]["peripherals"] as List<Dictionary<string, object>>;
                 var peripheral = peripherals.FirstOrDefault(p => p["uuid_Peripheral"].ToString() == uuid);
-                if(peripheral != null)
+                if (peripheral != null)
                 {
                     peripheral["name"] = newName;
                     userData[id_user]["peripherals"] = peripherals;
@@ -240,11 +253,11 @@ namespace BackendAPI.Services
                 { "@p_newLocation", newLocation }
             };
 
-            lock(userDataLock)
+            lock (userDataLock)
             {
                 var peripherals = userData[id_user]["peripherals"] as List<Dictionary<string, object>>;
                 var peripheral = peripherals.FirstOrDefault(p => p["uuid_Peripheral"].ToString() == uuid);
-                if(peripheral != null)
+                if (peripheral != null)
                 {
                     peripheral["location"] = newLocation;
                     userData[id_user]["peripherals"] = peripherals;
@@ -268,11 +281,11 @@ namespace BackendAPI.Services
                     { "@p_gridPosition", peripheral.Grid_position }
                 };
 
-                lock(userDataLock)
+                lock (userDataLock)
                 {
                     var peripherals = userData[request.id_user]["peripherals"] as List<Dictionary<string, object>>;
                     var peripheralData = peripherals.FirstOrDefault(p => p["uuid_Peripheral"].ToString() == peripheral.Uuid);
-                    if(peripheralData != null)
+                    if (peripheralData != null)
                     {
                         peripheralData["grid_position"] = peripheral.Grid_position;
                         userData[request.id_user]["peripherals"] = peripherals;

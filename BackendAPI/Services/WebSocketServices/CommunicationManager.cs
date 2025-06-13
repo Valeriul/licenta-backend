@@ -64,7 +64,7 @@ namespace BackendAPI.Services
             }
             catch (JsonException ex)
             {
-                Console.WriteLine($"Error parsing message JSON: {ex.Message}");
+                Console.WriteLine($" message JSON: {ex.Message}");
             }
             catch (Exception ex)
             {

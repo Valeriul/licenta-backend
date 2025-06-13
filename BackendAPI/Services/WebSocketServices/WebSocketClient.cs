@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using System.Net.WebSockets;
 using System.Text;
 using System.Threading;
+using Newtonsoft.Json;
 
 namespace BackendAPI.Services
 {
@@ -13,7 +14,8 @@ namespace BackendAPI.Services
         public ulong Key { get; private set; }
         public bool IsConnected => _clientWebSocket.State == WebSocketState.Open;
 
-        private readonly ConcurrentQueue<(TaskCompletionSource<string?>, DateTime)> _responseQueue;
+        // Changed from queue to dictionary for correlation ID matching
+        private readonly ConcurrentDictionary<string, (TaskCompletionSource<string?>, DateTime)> _pendingRequests;
 
         // Events for connection success and failure
         public event Action<ulong>? OnConnected;
@@ -24,7 +26,7 @@ namespace BackendAPI.Services
             _clientWebSocket = new ClientWebSocket();
             WebSocketUri = url;
             Key = key;
-            _responseQueue = new ConcurrentQueue<(TaskCompletionSource<string?>, DateTime)>();
+            _pendingRequests = new ConcurrentDictionary<string, (TaskCompletionSource<string?>, DateTime)>();
 
             // Start a background task to clean up stale tasks
             Task.Run(RemoveStaleTasksAndCloseConnection);
@@ -65,13 +67,38 @@ namespace BackendAPI.Services
             if (_clientWebSocket.State != WebSocketState.Open)
                 throw new InvalidOperationException("WebSocket is not connected.");
 
+            // Generate correlation ID
+            var correlationId = Guid.NewGuid().ToString();
             var responseTask = new TaskCompletionSource<string?>();
-            _responseQueue.Enqueue((responseTask, DateTime.UtcNow)); // Store task with timestamp
+            
+            // Store pending request with correlation ID
+            _pendingRequests[correlationId] = (responseTask, DateTime.UtcNow);
 
-            var messageBytes = Encoding.UTF8.GetBytes(message);
-            await _clientWebSocket.SendAsync(new ArraySegment<byte>(messageBytes), WebSocketMessageType.Text, true, CancellationToken.None);
+            try
+            {
+                // Create message with correlation ID
+                var messageWithCorrelation = new
+                {
+                    correlationId = correlationId,
+                    data = message,
+                    timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
+                };
 
-            return await responseTask.Task;
+                var jsonMessage = JsonConvert.SerializeObject(messageWithCorrelation);
+                var messageBytes = Encoding.UTF8.GetBytes(jsonMessage);
+                
+                await _clientWebSocket.SendAsync(new ArraySegment<byte>(messageBytes), WebSocketMessageType.Text, true, CancellationToken.None);
+                //Console.WriteLine($"[DEBUG] Sent message with correlation ID {correlationId}: {message}");
+
+                return await responseTask.Task;
+            }
+            catch (Exception ex)
+            {
+                // Clean up on error
+                _pendingRequests.TryRemove(correlationId, out _);
+                Console.WriteLine($"[ERROR] Failed to send message: {ex.Message}");
+                throw;
+            }
         }
 
         private async Task ListenForMessagesAsync()
@@ -102,21 +129,60 @@ namespace BackendAPI.Services
 
         private async Task HandleIncomingMessage(string message)
         {
-            if (_responseQueue.TryDequeue(out var item))
+            try
             {
-                var (responseTask, _) = item;
-
-                if (message == "null")
+                //Console.WriteLine($"[DEBUG] Received message: {message}");
+                
+                // Try to parse as JSON with correlation ID
+                var messageObject = JsonConvert.DeserializeObject<dynamic>(message);
+                
+                
+                if (messageObject?.correlationId != null)
                 {
-                    responseTask.SetResult(null);
+                    // Message with correlation ID
+                    string correlationId = messageObject.correlationId.ToString();
+                    
+                    if (_pendingRequests.TryRemove(correlationId, out var pendingRequest))
+                    {
+                        var (responseTask, _) = pendingRequest;
+                        
+                        // Extract response data
+                        string responseData = messageObject.data?.ToString();
+                        
+                        //Console.WriteLine($"[DEBUG] Matched response with correlation ID {correlationId}");
+                        
+                        if (responseData == "null" || string.IsNullOrEmpty(responseData))
+                        {
+                            responseTask.SetResult(null);
+                        }
+                        else
+                        {
+                            responseTask.SetResult(responseData);
+                        }
+                    }
+                    else
+                    {
+                        Console.WriteLine($"[WARNING] No pending request found for correlation ID {correlationId}");
+                        // Handle as unexpected message
+                        await CommunicationManager.Instance.HandleUnexpectedMessageAsync(Key, message);
+                    }
                 }
                 else
                 {
-                    responseTask.SetResult(message);
+                    // Handle messages without correlation ID (broadcasts, notifications, legacy)
+                    Console.WriteLine($"[INFO] Received message without correlation ID: {message}");
+                    await CommunicationManager.Instance.HandleUnexpectedMessageAsync(Key, message);
                 }
             }
-            else
+            catch (JsonException)
             {
+                // Not JSON, treat as unexpected message
+                //Console.WriteLine($"[DEBUG] Received plain text message (treating as unexpected): {message}");
+                await CommunicationManager.Instance.HandleUnexpectedMessageAsync(Key, message);
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[ERROR] Error handling received message: {ex.Message}");
                 await CommunicationManager.Instance.HandleUnexpectedMessageAsync(Key, message);
             }
         }
@@ -127,18 +193,24 @@ namespace BackendAPI.Services
             {
                 await Task.Delay(5000); // Check every 5 seconds
 
-                if (_responseQueue.TryPeek(out var oldestTask)) // Check only the first task
+                // Find the oldest pending request
+                var oldestRequest = _pendingRequests.Values.OrderBy(x => x.Item2).FirstOrDefault();
+                
+                if (oldestRequest.Item1 != null)
                 {
-                    var (_, timestamp) = oldestTask;
+                    var (_, timestamp) = oldestRequest;
                     if ((DateTime.UtcNow - timestamp).TotalSeconds > 10)
                     {
                         Console.WriteLine($"[WARNING] WebSocket (User ID: {Key}) timeout detected. Removing all pending tasks and closing connection.");
 
-                        // Clear all tasks in queue
-                        while (_responseQueue.TryDequeue(out var expiredTask))
+                        // Clear all tasks in dictionary
+                        foreach (var kvp in _pendingRequests.ToArray())
                         {
-                            var (task, _) = expiredTask;
-                            task.TrySetResult(null);
+                            if (_pendingRequests.TryRemove(kvp.Key, out var expiredRequest))
+                            {
+                                var (task, _) = expiredRequest;
+                                task.TrySetResult(null);
+                            }
                         }
 
                         // Close WebSocket connection
@@ -159,5 +231,8 @@ namespace BackendAPI.Services
                 Console.WriteLine($"[INFO] Connection to {WebSocketUri} closed due to timeout.");
             }
         }
+
+        // Helper method to get count of pending requests (for debugging)
+        public int GetPendingRequestsCount() => _pendingRequests.Count;
     }
 }
