@@ -5,6 +5,7 @@ using System.Linq;
 using System.Security.Cryptography.X509Certificates;
 using Newtonsoft.Json;
 using RasberryAPI.Middlewares;
+using RasberryAPI.Peripherals.Sensors; // Add this if TemperatureSensor is in this namespace
 
 namespace RasberryAPI.Peripherals
 {
@@ -14,8 +15,7 @@ namespace RasberryAPI.Peripherals
         {
             return config.PeripheralType.ToLower() switch
             {
-                "temperaturehumiditysensor" => new TemperatureHumiditySensor(config.Uuid, config.Url),
-                "temperaturecontrol" => new TemperatureControl(config.Uuid, config.Url),
+                "temperatureSensor" => new TemperatureSensor(config.Uuid, config.Url),
                 "led" => new LedControl(config.Uuid, config.Url),
                 _ => null
             };
