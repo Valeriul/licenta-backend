@@ -12,7 +12,9 @@ namespace BackendAPI.Services
         public string WebSocketUri { get; private set; }
 
         public ulong Key { get; private set; }
-        public bool IsConnected => _clientWebSocket.State == WebSocketState.Open;
+        public bool IsConnected => _clientWebSocket?.State == WebSocketState.Open;
+
+        public WebSocketState ConnectionState => _clientWebSocket?.State ?? WebSocketState.None;
 
         // Changed from queue to dictionary for correlation ID matching
         private readonly ConcurrentDictionary<string, (TaskCompletionSource<string?>, DateTime)> _pendingRequests;
@@ -34,30 +36,36 @@ namespace BackendAPI.Services
 
         public async Task ConnectAsync()
         {
-            if (_clientWebSocket.State == WebSocketState.Open)
+            // Check if already connected or connecting
+            if (_clientWebSocket.State == WebSocketState.Open ||
+                _clientWebSocket.State == WebSocketState.Connecting)
+            {
+                Console.WriteLine($"[INFO] WebSocket for user {Key} is already connected/connecting. State: {_clientWebSocket.State}");
                 return;
+            }
 
-            if (_clientWebSocket.State == WebSocketState.Closed || _clientWebSocket.State == WebSocketState.Aborted)
+            // Dispose and recreate if in a terminal state
+            if (_clientWebSocket.State == WebSocketState.Closed ||
+                _clientWebSocket.State == WebSocketState.Aborted)
             {
                 _clientWebSocket.Dispose();
-                _clientWebSocket = new ClientWebSocket(); // Recreate WebSocket
+                _clientWebSocket = new ClientWebSocket();
+                Console.WriteLine($"[INFO] Recreated WebSocket for user {Key}");
             }
 
             try
             {
+                Console.WriteLine($"[INFO] Attempting to connect to {WebSocketUri} for user {Key}");
                 await _clientWebSocket.ConnectAsync(new Uri(WebSocketUri), CancellationToken.None);
-                Console.WriteLine($"[INFO] Connected to {WebSocketUri}");
-                
-                OnConnected?.Invoke(Key); // Notify successful connection
-                
+                Console.WriteLine($"[INFO] Successfully connected to {WebSocketUri} for user {Key}");
+
+                OnConnected?.Invoke(Key);
                 _ = Task.Run(ListenForMessagesAsync);
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[ERROR] Failed to connect to WebSocket (User ID: {Key}): {ex.Message}");
-                
-                OnConnectionFailed?.Invoke(Key); // Notify failed connection
-                
+                Console.WriteLine($"[ERROR] Failed to connect WebSocket for user {Key}: {ex.Message}");
+                OnConnectionFailed?.Invoke(Key);
                 throw;
             }
         }
@@ -70,7 +78,7 @@ namespace BackendAPI.Services
             // Generate correlation ID
             var correlationId = Guid.NewGuid().ToString();
             var responseTask = new TaskCompletionSource<string?>();
-            
+
             // Store pending request with correlation ID
             _pendingRequests[correlationId] = (responseTask, DateTime.UtcNow);
 
@@ -86,7 +94,7 @@ namespace BackendAPI.Services
 
                 var jsonMessage = JsonConvert.SerializeObject(messageWithCorrelation);
                 var messageBytes = Encoding.UTF8.GetBytes(jsonMessage);
-                
+
                 await _clientWebSocket.SendAsync(new ArraySegment<byte>(messageBytes), WebSocketMessageType.Text, true, CancellationToken.None);
                 //Console.WriteLine($"[DEBUG] Sent message with correlation ID {correlationId}: {message}");
 
@@ -132,25 +140,25 @@ namespace BackendAPI.Services
             try
             {
                 //Console.WriteLine($"[DEBUG] Received message: {message}");
-                
+
                 // Try to parse as JSON with correlation ID
                 var messageObject = JsonConvert.DeserializeObject<dynamic>(message);
-                
-                
+
+
                 if (messageObject?.correlationId != null)
                 {
                     // Message with correlation ID
                     string correlationId = messageObject.correlationId.ToString();
-                    
+
                     if (_pendingRequests.TryRemove(correlationId, out var pendingRequest))
                     {
                         var (responseTask, _) = pendingRequest;
-                        
+
                         // Extract response data
                         string responseData = messageObject.data?.ToString();
-                        
+
                         //Console.WriteLine($"[DEBUG] Matched response with correlation ID {correlationId}");
-                        
+
                         if (responseData == "null" || string.IsNullOrEmpty(responseData))
                         {
                             responseTask.SetResult(null);
@@ -189,48 +197,85 @@ namespace BackendAPI.Services
 
         private async Task RemoveStaleTasksAndCloseConnection()
         {
+            const int timeoutSeconds = 15; // Increased timeout to 15 seconds
+            const int checkIntervalMs = 3000; // Check every 3 seconds
+
             while (true)
             {
-                await Task.Delay(5000); // Check every 5 seconds
-
-                // Find the oldest pending request
-                var oldestRequest = _pendingRequests.Values.OrderBy(x => x.Item2).FirstOrDefault();
-                
-                if (oldestRequest.Item1 != null)
+                try
                 {
-                    var (_, timestamp) = oldestRequest;
-                    if ((DateTime.UtcNow - timestamp).TotalSeconds > 10)
-                    {
-                        Console.WriteLine($"[WARNING] WebSocket (User ID: {Key}) timeout detected. Removing all pending tasks and closing connection.");
+                    await Task.Delay(checkIntervalMs);
 
-                        // Clear all tasks in dictionary
-                        foreach (var kvp in _pendingRequests.ToArray())
+                    // Skip if WebSocket is not connected
+                    if (_clientWebSocket?.State != WebSocketState.Open)
+                    {
+                        continue;
+                    }
+
+                    // Find stale requests
+                    var staleRequests = _pendingRequests
+                        .Where(kvp => (DateTime.UtcNow - kvp.Value.Item2).TotalSeconds > timeoutSeconds)
+                        .ToList();
+
+                    if (staleRequests.Any())
+                    {
+                        Console.WriteLine($"[WARNING] Found {staleRequests.Count} stale requests for user {Key}. Cleaning up...");
+
+                        // Clean up stale requests without closing the connection immediately
+                        foreach (var staleRequest in staleRequests)
                         {
-                            if (_pendingRequests.TryRemove(kvp.Key, out var expiredRequest))
+                            if (_pendingRequests.TryRemove(staleRequest.Key, out var expiredRequest))
                             {
-                                var (task, _) = expiredRequest;
-                                task.TrySetResult(null);
+                                expiredRequest.Item1.TrySetResult(null);
                             }
                         }
 
-                        // Close WebSocket connection
-                        await CloseAsync();
-
-                        return;
+                        // Only close connection if we have too many consecutive timeouts
+                        if (staleRequests.Count > 3)
+                        {
+                            Console.WriteLine($"[WARNING] Too many timeouts for user {Key}. Closing connection.");
+                            await CloseAsync();
+                            return;
+                        }
                     }
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"[ERROR] Error in timeout cleanup for user {Key}: {ex.Message}");
                 }
             }
         }
 
         public async Task CloseAsync()
         {
-            if (_clientWebSocket.State == WebSocketState.Open)
+            try
             {
-                await _clientWebSocket.CloseAsync(WebSocketCloseStatus.NormalClosure, "Closing connection due to timeout", CancellationToken.None);
-                OnConnectionFailed?.Invoke(Key); // Notify WebSocket connection failure
-                Console.WriteLine($"[INFO] Connection to {WebSocketUri} closed due to timeout.");
+                // Clear all pending requests first
+                foreach (var kvp in _pendingRequests.ToArray())
+                {
+                    if (_pendingRequests.TryRemove(kvp.Key, out var pendingRequest))
+                    {
+                        pendingRequest.Item1.TrySetResult(null);
+                    }
+                }
+
+                if (_clientWebSocket?.State == WebSocketState.Open)
+                {
+                    await _clientWebSocket.CloseAsync(
+                        WebSocketCloseStatus.NormalClosure,
+                        "Connection closed",
+                        CancellationToken.None);
+                }
+
+                Console.WriteLine($"[INFO] WebSocket connection closed for user {Key}");
+                OnConnectionFailed?.Invoke(Key);
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[ERROR] Error closing WebSocket for user {Key}: {ex.Message}");
             }
         }
+
 
         // Helper method to get count of pending requests (for debugging)
         public int GetPendingRequestsCount() => _pendingRequests.Count;

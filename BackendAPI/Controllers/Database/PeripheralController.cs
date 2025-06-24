@@ -24,6 +24,13 @@ namespace BackendAPI.Controllers
             return Ok(result);
         }
 
+        [HttpGet("getAggregatedData")]
+        public async Task<IActionResult> GetAggregatedData([FromQuery] ulong id_user, [FromQuery] string? uuid = null,[FromQuery] string? date_start = null, [FromQuery] string? date_end = null, [FromQuery] string? type = null)
+        {
+            var result = await _peripheralService.GetAggregatedData(id_user, uuid, date_start, date_end, type);
+            return Ok(result);
+        }
+            
         [HttpPost("makeControlCommand")]
         public async Task<IActionResult> MakeControlCommand([FromBody] BackendAPI.Models.ControlCommand Data, [FromQuery] ulong id_user)
         {

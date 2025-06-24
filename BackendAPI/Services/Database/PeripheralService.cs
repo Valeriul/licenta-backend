@@ -3,6 +3,7 @@ using System.Collections.Concurrent;
 using System.Threading.Tasks;
 using BackendAPI.Models;
 using Newtonsoft.Json;
+using Newtonsoft.Json.Linq;
 
 namespace BackendAPI.Services
 {
@@ -19,31 +20,50 @@ namespace BackendAPI.Services
 
         public async void HandleConnectionSuccess(ulong id_user)
         {
-            Console.WriteLine("[INFO] Connection success for user " + id_user);
-            await InitializePeripheral(id_user);
+            Console.WriteLine($"[INFO] Connection success for user {id_user}");
+
+            // Add retry logic for initialization
+            const int maxRetries = 3;
+            int retryCount = 0;
+
+            while (retryCount < maxRetries)
+            {
+                try
+                {
+                    await InitializePeripheral(id_user);
+                    break; // Success, exit retry loop
+                }
+                catch (Exception ex)
+                {
+                    retryCount++;
+                    Console.WriteLine($"[WARNING] InitializePeripheral attempt {retryCount} failed for user {id_user}: {ex.Message}");
+
+                    if (retryCount < maxRetries)
+                    {
+                        await Task.Delay(2000 * retryCount); // Exponential backoff
+                    }
+                }
+            }
+
+            // Continue with peripheral data gathering...
             var peripheralsJson = await GetAllPeripherals(id_user);
             var peripheralsList = JsonConvert.DeserializeObject<List<Dictionary<string, object>>>(peripheralsJson);
 
-            peripheralsList.ForEach(peripheral =>
+            peripheralsList?.ForEach(peripheral =>
             {
                 peripheral.Add("data", null);
             });
 
             lock (userDataLock)
             {
-                // Ensure the userData entry exists
                 if (!userData.ContainsKey(id_user))
                 {
                     userData[id_user] = new Dictionary<string, object>();
                 }
 
-                // Store the peripherals
-                userData[id_user]["peripherals"] = peripheralsList;
-
-                // Stop any previous task
+                userData[id_user]["peripherals"] = peripheralsList ?? new List<Dictionary<string, object>>();
                 StopGatheringTask(id_user);
 
-                // Create a new cancellation token source
                 var cancellationTokenSource = new CancellationTokenSource();
                 userData[id_user]["cancellationToken"] = cancellationTokenSource;
 
@@ -51,8 +71,16 @@ namespace BackendAPI.Services
                 {
                     while (!cancellationTokenSource.Token.IsCancellationRequested)
                     {
-                        await GatherData(id_user);
-                        await Task.Delay(3000, cancellationTokenSource.Token);
+                        try
+                        {
+                            await GatherData(id_user);
+                            await Task.Delay(3000, cancellationTokenSource.Token);
+                        }
+                        catch (Exception ex) when (!cancellationTokenSource.Token.IsCancellationRequested)
+                        {
+                            Console.WriteLine($"[ERROR] Error in data gathering for user {id_user}: {ex.Message}");
+                            await Task.Delay(5000, cancellationTokenSource.Token); // Wait longer on error
+                        }
                     }
                 }, cancellationTokenSource.Token);
             }
@@ -65,8 +93,19 @@ namespace BackendAPI.Services
             var data = new List<Dictionary<string, object>>();
             try
             {
-                Console.WriteLine($"[INFO] Raw data for user {id_user}: {allDataJson}");
+                Console.WriteLine("[INFO] Gathering data for user " + id_user);
                 var rawData = JsonConvert.DeserializeObject<List<string>>(allDataJson);
+                Console.WriteLine("[INFO] Raw data: " + rawData[0]);
+
+                if (rawData == null || rawData.Count == 0)
+                {
+                    await CommunicationManager.Instance.HandleCommand(new CommandRequest
+                    {
+                        CommandType = "GET_ALL_PERIPHERALS",
+                        id_user = id_user,
+                    });
+                }
+
                 data = JsonConvert.DeserializeObject<List<Dictionary<string, object>>>(rawData[0]);
             }
             catch (System.Exception e)
@@ -95,6 +134,30 @@ namespace BackendAPI.Services
 
                 userData[id_user] = user;
             }
+        }
+
+        public async Task<string> GetAggregatedData(ulong id_user, string? uuid = null, string? date_start = null, string? date_end = null, string? type = null)
+        {
+            var requestData = new
+            {
+                Data = JsonConvert.SerializeObject(new
+                {
+                    date_start = date_start,
+                    date_end = date_end,
+                    type = type
+                }),
+                CommandType = "GET_AGGREGATED_DATA",
+                Uuid = uuid
+            };
+
+            var result = await CommunicationManager.Instance.HandleCommand(new CommandRequest
+            {
+                CommandType = "GET_AGGREGATED_DATA",
+                id_user = id_user,
+                Data = JsonConvert.SerializeObject(requestData)
+            });
+
+            return result ?? string.Empty;
         }
 
         public void HandleConnectionFailure(ulong id_user)
@@ -128,6 +191,7 @@ namespace BackendAPI.Services
                 CommandType = "GET_ALL_DATA",
                 id_user = id_user,
             });
+
 
             return result ?? string.Empty;
         }

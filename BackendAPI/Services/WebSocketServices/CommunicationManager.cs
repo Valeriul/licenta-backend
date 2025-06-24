@@ -11,28 +11,28 @@ namespace BackendAPI.Services
 
         private CommunicationManager() { }
 
-        
+
         public async Task HandleUnexpectedMessageAsync(ulong webSocketKey, string message)
         {
             try
             {
-                
+
                 var jsonMessage = JObject.Parse(message);
 
-                
+
                 var messageType = jsonMessage["type"]?.ToString();
 
                 switch (messageType)
                 {
                     case "peripheralAdded":
-                        
+
                         var addedPeripheral = jsonMessage["data"];
                         if (addedPeripheral != null)
                         {
                             string uuid = addedPeripheral["uuid"]?.ToString();
                             string peripheralType = addedPeripheral["type"]?.ToString();
 
-                            
+
                             await MySqlDatabaseService.Instance.ExecuteQueryAsync("INSERT INTO peripherals (uuid_Peripheral, type, uuid_Central) VALUES (@uuid, @type,(SELECT uuid_Central FROM users where id_user = @id_user));", new Dictionary<string, object>
                             {
                                 { "@uuid", uuid },
@@ -43,7 +43,7 @@ namespace BackendAPI.Services
                         break;
 
                     case "peripheralRemoved":
-                        
+
                         var removedPeripheral = jsonMessage["data"];
                         if (removedPeripheral != null)
                         {
@@ -91,6 +91,8 @@ namespace BackendAPI.Services
                 case "get_all_peripherals":
                     return await WebSocketManager.Instance.SendMessageAsync(request.id_user, "{\"CommandType\":\"ALL_PERIPHERALS\"}");
                 case "control":
+                    return await WebSocketManager.Instance.SendMessageAsync(request.id_user, request.Data);
+                case "get_aggregated_data":
                     return await WebSocketManager.Instance.SendMessageAsync(request.id_user, request.Data);
                 default:
                     Console.WriteLine($"Unknown command: {request.CommandType}");

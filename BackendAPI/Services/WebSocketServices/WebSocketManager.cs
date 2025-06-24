@@ -11,6 +11,8 @@ namespace BackendAPI.Services
         private static readonly Lazy<WebSocketManager> _instance = new Lazy<WebSocketManager>(() => new WebSocketManager());
         public static WebSocketManager Instance => _instance.Value;
 
+        
+
         private readonly ConcurrentDictionary<ulong, WebSocketClient> _clients = new ConcurrentDictionary<ulong, WebSocketClient>();
 
         // Event handlers for connection success and failure
@@ -83,29 +85,31 @@ namespace BackendAPI.Services
         {
             if (_clients.TryGetValue(id_user, out var client))
             {
-                if (client.IsConnected == true)
-                {
-                    return await client.SendMessageAndWaitForResponseAsync(message);
-                }
-                else
+                // Check connection state before attempting to send
+                if (client.IsConnected)
                 {
                     try
                     {
-                        await client.ConnectAsync();
                         return await client.SendMessageAndWaitForResponseAsync(message);
                     }
                     catch (Exception ex)
                     {
-                        Console.WriteLine($"Failed to connect WebSocket for user {id_user}: {ex.Message}");
+                        Console.WriteLine($"[ERROR] Failed to send message for user {id_user}: {ex.Message}");
+                        // Connection might have dropped, try to reconnect
+                        await AttemptReconnection(id_user, client);
                         return null;
                     }
+                }
+                else
+                {
+                    // Try to reconnect if not connected
+                    return await AttemptReconnection(id_user, client, message);
                 }
             }
             else
             {
-                Console.WriteLine($"WebSocket client not found for user {id_user}. Registering...");
-                await AddWebSocketAsync(id_user, message);
-                return await SendMessageAsync(id_user, message);
+                Console.WriteLine($"[WARNING] WebSocket client not found for user {id_user}");
+                return null;
             }
         }
 
@@ -121,6 +125,27 @@ namespace BackendAPI.Services
                 {
                     Console.WriteLine($"Failed to reconnect WebSocket for user {id_user}: {ex.Message}");
                 }
+            }
+        }
+
+        private async Task<string?> AttemptReconnection(ulong id_user, WebSocketClient client, string message = null)
+        {
+            try
+            {
+                Console.WriteLine($"[INFO] Attempting reconnection for user {id_user}");
+                await client.ConnectAsync();
+
+                if (message != null && client.IsConnected)
+                {
+                    return await client.SendMessageAndWaitForResponseAsync(message);
+                }
+
+                return null;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[ERROR] Reconnection failed for user {id_user}: {ex.Message}");
+                return null;
             }
         }
 
