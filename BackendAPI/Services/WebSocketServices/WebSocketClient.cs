@@ -19,6 +19,10 @@ namespace BackendAPI.Services
         // Changed from queue to dictionary for correlation ID matching
         private readonly ConcurrentDictionary<string, (TaskCompletionSource<string?>, DateTime)> _pendingRequests;
 
+        // Track consecutive stale cleanup cycles
+        private int _consecutiveStaleCleanups = 0;
+        private const int MAX_CONSECUTIVE_STALE_CLEANUPS = 3;
+
         // Events for connection success and failure
         public event Action<ulong>? OnConnected;
         public event Action<ulong>? OnConnectionFailed;
@@ -58,6 +62,9 @@ namespace BackendAPI.Services
                 Console.WriteLine($"[INFO] Attempting to connect to {WebSocketUri} for user {Key}");
                 await _clientWebSocket.ConnectAsync(new Uri(WebSocketUri), CancellationToken.None);
                 Console.WriteLine($"[INFO] Successfully connected to {WebSocketUri} for user {Key}");
+
+                // Reset consecutive stale cleanups counter on successful connection
+                _consecutiveStaleCleanups = 0;
 
                 OnConnected?.Invoke(Key);
                 _ = Task.Run(ListenForMessagesAsync);
@@ -144,7 +151,6 @@ namespace BackendAPI.Services
                 // Try to parse as JSON with correlation ID
                 var messageObject = JsonConvert.DeserializeObject<dynamic>(message);
 
-
                 if (messageObject?.correlationId != null)
                 {
                     // Message with correlation ID
@@ -197,7 +203,7 @@ namespace BackendAPI.Services
 
         private async Task RemoveStaleTasksAndCloseConnection()
         {
-            const int timeoutSeconds = 15; // Increased timeout to 15 seconds
+            const int timeoutSeconds = 15; // Timeout for individual requests
             const int checkIntervalMs = 3000; // Check every 3 seconds
 
             while (true)
@@ -221,7 +227,10 @@ namespace BackendAPI.Services
                     {
                         Console.WriteLine($"[WARNING] Found {staleRequests.Count} stale requests for user {Key}. Cleaning up...");
 
-                        // Clean up stale requests without closing the connection immediately
+                        // Increment consecutive stale cleanups counter
+                        _consecutiveStaleCleanups++;
+
+                        // Clean up stale requests
                         foreach (var staleRequest in staleRequests)
                         {
                             if (_pendingRequests.TryRemove(staleRequest.Key, out var expiredRequest))
@@ -230,18 +239,32 @@ namespace BackendAPI.Services
                             }
                         }
 
-                        // Only close connection if we have too many consecutive timeouts
-                        if (staleRequests.Count > 3)
+                        // Check if we've had too many consecutive stale cleanups
+                        if (_consecutiveStaleCleanups >= MAX_CONSECUTIVE_STALE_CLEANUPS)
                         {
-                            Console.WriteLine($"[WARNING] Too many timeouts for user {Key}. Closing connection.");
+                            Console.WriteLine($"[ERROR] Connection appears dead for user {Key}. " +
+                                           $"Had {_consecutiveStaleCleanups} consecutive stale cleanup cycles. " +
+                                           $"Closing connection.");
                             await CloseAsync();
                             return;
+                        }
+
+                        Console.WriteLine($"[INFO] Consecutive stale cleanups for user {Key}: {_consecutiveStaleCleanups}/{MAX_CONSECUTIVE_STALE_CLEANUPS}");
+                    }
+                    else
+                    {
+                        // Reset counter when no stale requests found
+                        if (_consecutiveStaleCleanups > 0)
+                        {
+                            Console.WriteLine($"[INFO] No stale requests found for user {Key}. Resetting consecutive cleanup counter.");
+                            _consecutiveStaleCleanups = 0;
                         }
                     }
                 }
                 catch (Exception ex)
                 {
                     Console.WriteLine($"[ERROR] Error in timeout cleanup for user {Key}: {ex.Message}");
+                    // Don't increment stale counter for cleanup errors
                 }
             }
         }
@@ -276,8 +299,10 @@ namespace BackendAPI.Services
             }
         }
 
-
         // Helper method to get count of pending requests (for debugging)
         public int GetPendingRequestsCount() => _pendingRequests.Count;
+
+        // Helper method to get consecutive stale cleanups count (for debugging)
+        public int GetConsecutiveStaleCleanups() => _consecutiveStaleCleanups;
     }
 }
