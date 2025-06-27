@@ -17,7 +17,6 @@ namespace BackendAPI.Services
 
         private PeripheralService() { }
 
-
         public async void HandleConnectionSuccess(ulong id_user)
         {
             Console.WriteLine($"[INFO] Connection success for user {id_user}");
@@ -42,97 +41,204 @@ namespace BackendAPI.Services
                     {
                         await Task.Delay(2000 * retryCount); // Exponential backoff
                     }
+                    else
+                    {
+                        Console.WriteLine($"[ERROR] Failed to initialize peripherals for user {id_user} after {maxRetries} attempts");
+                        return; // Exit if all retries failed
+                    }
                 }
             }
 
             // Continue with peripheral data gathering...
-            var peripheralsJson = await GetAllPeripherals(id_user);
-            var peripheralsList = JsonConvert.DeserializeObject<List<Dictionary<string, object>>>(peripheralsJson);
-
-            peripheralsList?.ForEach(peripheral =>
-            {
-                peripheral.Add("data", null);
-            });
-
-            lock (userDataLock)
-            {
-                if (!userData.ContainsKey(id_user))
-                {
-                    userData[id_user] = new Dictionary<string, object>();
-                }
-
-                userData[id_user]["peripherals"] = peripheralsList ?? new List<Dictionary<string, object>>();
-                StopGatheringTask(id_user);
-
-                var cancellationTokenSource = new CancellationTokenSource();
-                userData[id_user]["cancellationToken"] = cancellationTokenSource;
-
-                Task.Run(async () =>
-                {
-                    while (!cancellationTokenSource.Token.IsCancellationRequested)
-                    {
-                        try
-                        {
-                            await GatherData(id_user);
-                            await Task.Delay(3000, cancellationTokenSource.Token);
-                        }
-                        catch (Exception ex) when (!cancellationTokenSource.Token.IsCancellationRequested)
-                        {
-                            Console.WriteLine($"[ERROR] Error in data gathering for user {id_user}: {ex.Message}");
-                            await Task.Delay(5000, cancellationTokenSource.Token); // Wait longer on error
-                        }
-                    }
-                }, cancellationTokenSource.Token);
-            }
-        }
-
-        private async Task GatherData(ulong id_user)
-        {
-            var allDataJson = await GetAllData(id_user);
-
-            var data = new List<Dictionary<string, object>>();
             try
             {
-                Console.WriteLine("[INFO] Gathering data for user " + id_user);
-                var rawData = JsonConvert.DeserializeObject<List<string>>(allDataJson);
-                Console.WriteLine("[INFO] Raw data: " + rawData[0]);
+                var peripheralsJson = await GetAllPeripherals(id_user);
 
-                if (rawData == null || rawData.Count == 0)
+                if (string.IsNullOrEmpty(peripheralsJson))
                 {
-                    await CommunicationManager.Instance.HandleCommand(new CommandRequest
-                    {
-                        CommandType = "GET_ALL_PERIPHERALS",
-                        id_user = id_user,
-                    });
-                }
-
-                data = JsonConvert.DeserializeObject<List<Dictionary<string, object>>>(rawData[0]);
-            }
-            catch (System.Exception e)
-            {
-                System.Console.WriteLine(e.Message);
-            }
-
-            lock (userDataLock)
-            {
-                if (!userData.TryGetValue(id_user, out var user))
-                {
+                    Console.WriteLine($"[WARNING] No peripherals data received for user {id_user}");
                     return;
                 }
 
-                var peripherals = user["peripherals"] as List<Dictionary<string, object>>;
-                foreach (var peripheral in peripherals)
+                var peripheralsList = JsonConvert.DeserializeObject<List<Dictionary<string, object>>>(peripheralsJson);
+
+                // Validate deserialization result
+                if (peripheralsList == null)
                 {
-                    var matchingData = data.FirstOrDefault(d => d["uuid"].ToString() == peripheral["uuid_Peripheral"].ToString());
-                    if (matchingData != null)
-                    {
-                        peripheral["data"] = matchingData["data"] != null
-                            ? JsonConvert.DeserializeObject(matchingData["data"].ToString() ?? "{}")
-                            : null;
-                    }
+                    Console.WriteLine($"[WARNING] Failed to deserialize peripherals for user {id_user}");
+                    peripheralsList = new List<Dictionary<string, object>>();
                 }
 
-                userData[id_user] = user;
+                peripheralsList.ForEach(peripheral =>
+                {
+                    if (peripheral != null)
+                    {
+                        peripheral["data"] = null;
+                    }
+                });
+
+                lock (userDataLock)
+                {
+                    // Initialize user data if it doesn't exist
+                    if (!userData.ContainsKey(id_user))
+                    {
+                        userData[id_user] = new Dictionary<string, object>();
+                    }
+
+                    userData[id_user]["peripherals"] = peripheralsList;
+                    StopGatheringTask(id_user);
+
+                    var cancellationTokenSource = new CancellationTokenSource();
+                    userData[id_user]["cancellationToken"] = cancellationTokenSource;
+
+                    // Start data gathering task with better error handling
+                    Task.Run(async () =>
+                    {
+                        while (!cancellationTokenSource.Token.IsCancellationRequested)
+                        {
+                            try
+                            {
+                                // Check if user data still exists before gathering
+                                if (!userData.ContainsKey(id_user))
+                                {
+                                    Console.WriteLine($"[INFO] User {id_user} data removed, stopping data gathering");
+                                    break;
+                                }
+
+                                await GatherData(id_user);
+                                await Task.Delay(3000, cancellationTokenSource.Token);
+                            }
+                            catch (OperationCanceledException)
+                            {
+                                Console.WriteLine($"[INFO] Data gathering cancelled for user {id_user}");
+                                break;
+                            }
+                            catch (Exception ex) when (!cancellationTokenSource.Token.IsCancellationRequested)
+                            {
+                                Console.WriteLine($"[ERROR] Error in data gathering for user {id_user}: {ex.Message}");
+                                await Task.Delay(5000, cancellationTokenSource.Token); // Wait longer on error
+                            }
+                        }
+                    }, cancellationTokenSource.Token);
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[ERROR] Error in HandleConnectionSuccess for user {id_user}: {ex.Message}");
+            }
+        }
+        private async Task GatherData(ulong id_user)
+        {
+            try
+            {
+                Console.WriteLine("[INFO] Gathering data for user " + id_user);
+
+                // Check if user data exists before proceeding
+                if (!userData.ContainsKey(id_user))
+                {
+                    Console.WriteLine($"[WARNING] User data not found for user {id_user}");
+                    return;
+                }
+
+                var allDataJson = await GetAllData(id_user);
+
+                // Check if we got valid data
+                if (string.IsNullOrEmpty(allDataJson))
+                {
+                    Console.WriteLine($"[WARNING] No data received for user {id_user}");
+                    return;
+                }
+
+                var data = new List<Dictionary<string, object>>();
+
+                try
+                {
+                    var rawData = JsonConvert.DeserializeObject<List<string>>(allDataJson);
+
+                    if (rawData == null || rawData.Count == 0)
+                    {
+                        Console.WriteLine($"[INFO] No raw data available for user {id_user}, requesting peripherals");
+                        await CommunicationManager.Instance.HandleCommand(new CommandRequest
+                        {
+                            CommandType = "GET_ALL_PERIPHERALS",
+                            id_user = id_user,
+                        });
+                        return;
+                    }
+
+                    Console.WriteLine("[INFO] Raw data: " + rawData[0]);
+
+                    // Check if the first element is valid before deserializing
+                    if (!string.IsNullOrEmpty(rawData[0]))
+                    {
+                        data = JsonConvert.DeserializeObject<List<Dictionary<string, object>>>(rawData[0])
+                               ?? new List<Dictionary<string, object>>();
+                    }
+                }
+                catch (JsonException jsonEx)
+                {
+                    Console.WriteLine($"[ERROR] JSON deserialization error for user {id_user}: {jsonEx.Message}");
+                    return;
+                }
+
+                lock (userDataLock)
+                {
+                    // Double-check user data exists after acquiring lock
+                    if (!userData.TryGetValue(id_user, out var user))
+                    {
+                        Console.WriteLine($"[WARNING] User data removed while processing for user {id_user}");
+                        return;
+                    }
+
+                    // Safely get peripherals list
+                    if (!user.TryGetValue("peripherals", out var peripheralsObj) ||
+                        peripheralsObj is not List<Dictionary<string, object>> peripherals)
+                    {
+                        Console.WriteLine($"[WARNING] Invalid peripherals data for user {id_user}");
+                        return;
+                    }
+
+                    foreach (var peripheral in peripherals)
+                    {
+                        if (peripheral == null) continue;
+
+                        // Safely get peripheral UUID
+                        if (!peripheral.TryGetValue("uuid_Peripheral", out var peripheralUuidObj) ||
+                            peripheralUuidObj == null)
+                        {
+                            Console.WriteLine($"[WARNING] Peripheral missing UUID for user {id_user}");
+                            continue;
+                        }
+
+                        string peripheralUuid = peripheralUuidObj.ToString();
+
+                        // Find matching data
+                        var matchingData = data.FirstOrDefault(d =>
+                            d != null &&
+                            d.TryGetValue("uuid", out var dataUuidObj) &&
+                            dataUuidObj?.ToString() == peripheralUuid);
+
+                        if (matchingData != null &&
+                            matchingData.TryGetValue("data", out var dataObj))
+                        {
+                            peripheral["data"] = dataObj != null
+                                ? JsonConvert.DeserializeObject(dataObj.ToString() ?? "{}")
+                                : null;
+                        }
+                        else
+                        {
+                            // Set data to null if no matching data found
+                            peripheral["data"] = null;
+                        }
+                    }
+
+                    userData[id_user] = user;
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[ERROR] Unexpected error in GatherData for user {id_user}: {ex.Message}");
+                Console.WriteLine($"[ERROR] Stack trace: {ex.StackTrace}");
             }
         }
 
