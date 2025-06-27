@@ -16,10 +16,12 @@ namespace BackendAPI.Services
         private static readonly object userDataLock = new object();
 
         private PeripheralService() { }
-
         public async void HandleConnectionSuccess(ulong id_user)
         {
             Console.WriteLine($"[INFO] Connection success for user {id_user}");
+
+            // Reset any previous data gathering failures
+            WebSocketManager.Instance.ResetDataGatheringFailures(id_user);
 
             // Add retry logic for initialization
             const int maxRetries = 3;
@@ -91,9 +93,12 @@ namespace BackendAPI.Services
                     var cancellationTokenSource = new CancellationTokenSource();
                     userData[id_user]["cancellationToken"] = cancellationTokenSource;
 
-                    // Start data gathering task with better error handling
+                    // Start data gathering task with better error handling and timeout detection
                     Task.Run(async () =>
                     {
+                        int consecutiveFailures = 0;
+                        const int maxConsecutiveFailures = 5;
+
                         while (!cancellationTokenSource.Token.IsCancellationRequested)
                         {
                             try
@@ -105,7 +110,18 @@ namespace BackendAPI.Services
                                     break;
                                 }
 
+                                Console.WriteLine($"[DEBUG] Starting data gathering cycle for user {id_user}");
+                                var startTime = DateTime.UtcNow;
+
                                 await GatherData(id_user);
+
+                                var duration = (DateTime.UtcNow - startTime).TotalSeconds;
+                                Console.WriteLine($"[DEBUG] Data gathering completed for user {id_user} in {duration:F1}s");
+
+                                // Reset failure counter on success
+                                consecutiveFailures = 0;
+                                WebSocketManager.Instance.ResetDataGatheringFailures(id_user);
+
                                 await Task.Delay(3000, cancellationTokenSource.Token);
                             }
                             catch (OperationCanceledException)
@@ -113,10 +129,21 @@ namespace BackendAPI.Services
                                 Console.WriteLine($"[INFO] Data gathering cancelled for user {id_user}");
                                 break;
                             }
-                            catch (Exception ex) when (!cancellationTokenSource.Token.IsCancellationRequested)
+                            catch (Exception ex)
                             {
-                                Console.WriteLine($"[ERROR] Error in data gathering for user {id_user}: {ex.Message}");
-                                await Task.Delay(5000, cancellationTokenSource.Token); // Wait longer on error
+                                consecutiveFailures++;
+                                Console.WriteLine($"[ERROR] Error in data gathering for user {id_user} (failure {consecutiveFailures}/{maxConsecutiveFailures}): {ex.Message}");
+
+                                if (consecutiveFailures >= maxConsecutiveFailures)
+                                {
+                                    Console.WriteLine($"[ERROR] Too many consecutive failures for user {id_user}. Stopping data gathering and requesting reconnection.");
+                                    WebSocketManager.Instance.HandleDataGatheringTimeout(id_user);
+                                    break;
+                                }
+
+                                // Wait longer on consecutive failures
+                                var delayMs = Math.Min(10000, 2000 * consecutiveFailures);
+                                await Task.Delay(delayMs, cancellationTokenSource.Token);
                             }
                         }
                     }, cancellationTokenSource.Token);
@@ -127,11 +154,14 @@ namespace BackendAPI.Services
                 Console.WriteLine($"[ERROR] Error in HandleConnectionSuccess for user {id_user}: {ex.Message}");
             }
         }
+
         private async Task GatherData(ulong id_user)
         {
+            using var timeoutCts = new CancellationTokenSource(TimeSpan.FromSeconds(20)); // 20-second timeout
+
             try
             {
-                Console.WriteLine("[INFO] Gathering data for user " + id_user);
+                Console.WriteLine($"[INFO] Gathering data for user {id_user}");
 
                 // Check if user data exists before proceeding
                 if (!userData.ContainsKey(id_user))
@@ -140,7 +170,8 @@ namespace BackendAPI.Services
                     return;
                 }
 
-                var allDataJson = await GetAllData(id_user);
+                // Get data with timeout
+                var allDataJson = await GetAllDataWithTimeout(id_user, timeoutCts.Token);
 
                 // Check if we got valid data
                 if (string.IsNullOrEmpty(allDataJson))
@@ -166,7 +197,7 @@ namespace BackendAPI.Services
                         return;
                     }
 
-                    Console.WriteLine("[INFO] Raw data: " + rawData[0]);
+                    Console.WriteLine($"[INFO] Raw data received for user {id_user}: {rawData[0]}");
 
                     // Check if the first element is valid before deserializing
                     if (!string.IsNullOrEmpty(rawData[0]))
@@ -234,6 +265,14 @@ namespace BackendAPI.Services
 
                     userData[id_user] = user;
                 }
+
+                Console.WriteLine($"[INFO] Successfully gathered data for user {id_user}");
+            }
+            catch (OperationCanceledException) when (timeoutCts.Token.IsCancellationRequested)
+            {
+                Console.WriteLine($"[ERROR] Data gathering timed out for user {id_user} after 20 seconds");
+                // Consider this a connection issue - notify WebSocket manager
+                WebSocketManager.Instance.HandleDataGatheringTimeout(id_user);
             }
             catch (Exception ex)
             {
@@ -242,6 +281,30 @@ namespace BackendAPI.Services
             }
         }
 
+        private async Task<string> GetAllDataWithTimeout(ulong id_user, CancellationToken cancellationToken)
+        {
+            try
+            {
+                // Create a task that will complete when either the operation finishes or timeout occurs
+                var dataTask = GetAllData(id_user);
+                var timeoutTask = Task.Delay(Timeout.Infinite, cancellationToken);
+
+                var completedTask = await Task.WhenAny(dataTask, timeoutTask);
+
+                if (completedTask == timeoutTask)
+                {
+                    Console.WriteLine($"[WARNING] GetAllData timed out for user {id_user}");
+                    cancellationToken.ThrowIfCancellationRequested();
+                }
+
+                return await dataTask;
+            }
+            catch (OperationCanceledException)
+            {
+                Console.WriteLine($"[ERROR] GetAllData was cancelled for user {id_user}");
+                throw;
+            }
+        }
         public async Task<string> GetAggregatedData(ulong id_user, string? uuid = null, string? date_start = null, string? date_end = null, string? type = null)
         {
             var requestData = new

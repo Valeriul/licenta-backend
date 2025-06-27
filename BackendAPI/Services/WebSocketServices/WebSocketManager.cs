@@ -11,7 +11,7 @@ namespace BackendAPI.Services
         private static readonly Lazy<WebSocketManager> _instance = new Lazy<WebSocketManager>(() => new WebSocketManager());
         public static WebSocketManager Instance => _instance.Value;
 
-        
+
 
         private readonly ConcurrentDictionary<ulong, WebSocketClient> _clients = new ConcurrentDictionary<ulong, WebSocketClient>();
 
@@ -150,5 +150,55 @@ namespace BackendAPI.Services
         }
 
         public ConcurrentDictionary<ulong, WebSocketClient> GetAllClients() => _clients;
+
+        // Add this method to WebSocketManager class
+
+        private readonly ConcurrentDictionary<ulong, int> _dataGatheringFailures = new ConcurrentDictionary<ulong, int>();
+        private const int MAX_DATA_GATHERING_FAILURES = 3;
+
+        public void HandleDataGatheringTimeout(ulong id_user)
+        {
+            var failureCount = _dataGatheringFailures.AddOrUpdate(id_user, 1, (key, oldValue) => oldValue + 1);
+
+            Console.WriteLine($"[WARNING] Data gathering failure {failureCount}/{MAX_DATA_GATHERING_FAILURES} for user {id_user}");
+
+            if (failureCount >= MAX_DATA_GATHERING_FAILURES)
+            {
+                Console.WriteLine($"[ERROR] Too many data gathering failures for user {id_user}. Forcing WebSocket reconnection.");
+
+                // Remove failure tracking
+                _dataGatheringFailures.TryRemove(id_user, out _);
+
+                // Force close and reconnect the WebSocket
+                _ = Task.Run(async () =>
+                {
+                    if (_clients.TryGetValue(id_user, out var client))
+                    {
+                        await client.CloseAsync();
+
+                        // Wait a bit before reconnecting
+                        await Task.Delay(2000);
+
+                        try
+                        {
+                            await client.ConnectAsync();
+                            Console.WriteLine($"[INFO] Successfully reconnected WebSocket for user {id_user} after data gathering failures");
+                        }
+                        catch (Exception ex)
+                        {
+                            Console.WriteLine($"[ERROR] Failed to reconnect WebSocket for user {id_user}: {ex.Message}");
+                        }
+                    }
+                });
+            }
+        }
+
+        public void ResetDataGatheringFailures(ulong id_user)
+        {
+            if (_dataGatheringFailures.TryRemove(id_user, out var failureCount))
+            {
+                Console.WriteLine($"[INFO] Reset data gathering failure count for user {id_user} (was {failureCount})");
+            }
+        }
     }
 }
