@@ -165,6 +165,13 @@ namespace BackendAPI.Services
 
                         //Console.WriteLine($"[DEBUG] Matched response with correlation ID {correlationId}");
 
+                        // Reset consecutive stale cleanups on successful response
+                        if (_consecutiveStaleCleanups > 0)
+                        {
+                            Console.WriteLine($"[INFO] Successful response received for user {Key}. Resetting consecutive cleanup counter from {_consecutiveStaleCleanups} to 0.");
+                            _consecutiveStaleCleanups = 0;
+                        }
+
                         if (responseData == "null" || string.IsNullOrEmpty(responseData))
                         {
                             responseTask.SetResult(null);
@@ -204,7 +211,9 @@ namespace BackendAPI.Services
         private async Task RemoveStaleTasksAndCloseConnection()
         {
             const int timeoutSeconds = 15; // Timeout for individual requests
-            const int checkIntervalMs = 3000; // Check every 3 seconds
+            const int checkIntervalMs = 5000; // Check every 5 seconds (different from data gathering)
+            DateTime lastSuccessfulActivity = DateTime.UtcNow;
+            const int healthyActivityTimeoutSeconds = 30; // Consider connection dead if no successful activity for 30 seconds
 
             while (true)
             {
@@ -253,12 +262,24 @@ namespace BackendAPI.Services
                     }
                     else
                     {
-                        // Reset counter when no stale requests found
-                        if (_consecutiveStaleCleanups > 0)
+                        // Update last successful activity time
+                        lastSuccessfulActivity = DateTime.UtcNow;
+                        
+                        // Only reset consecutive counter if we have successful activity AND pending requests were processed
+                        if (_consecutiveStaleCleanups > 0 && _pendingRequests.Count == 0)
                         {
-                            Console.WriteLine($"[INFO] No stale requests found for user {Key}. Resetting consecutive cleanup counter.");
+                            Console.WriteLine($"[INFO] All requests processed successfully for user {Key}. Resetting consecutive cleanup counter.");
                             _consecutiveStaleCleanups = 0;
                         }
+                    }
+
+                    // Additional check: if we haven't had successful activity for too long, consider connection dead
+                    var timeSinceLastActivity = (DateTime.UtcNow - lastSuccessfulActivity).TotalSeconds;
+                    if (timeSinceLastActivity > healthyActivityTimeoutSeconds && _pendingRequests.Count > 0)
+                    {
+                        Console.WriteLine($"[ERROR] No successful activity for {timeSinceLastActivity:F1}s for user {Key} with {_pendingRequests.Count} pending requests. Closing connection.");
+                        await CloseAsync();
+                        return;
                     }
                 }
                 catch (Exception ex)
